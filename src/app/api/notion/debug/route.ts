@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { notion, DB_IDS } from '@/lib/notion'
+import { notion, DB_IDS } from '../../../../lib/notion' // <-- relative path, no @ alias
 
 export async function GET() {
   const out: any = {
@@ -10,11 +10,9 @@ export async function GET() {
   }
 
   try {
-    // ping Notion
     const me = await notion.users.me()
     out.me = { type: (me as any).type }
 
-    // list DB titles + properties
     for (const id of DB_IDS) {
       try {
         const db = await notion.databases.retrieve({ database_id: id })
@@ -34,3 +32,4 @@ export async function GET() {
 
   return NextResponse.json(out)
 }
+
