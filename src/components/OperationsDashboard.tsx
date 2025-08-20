@@ -1,5 +1,3 @@
-'use client';
-
 import { useEffect, useMemo, useState } from 'react';
 
 /* ---------- Types ---------- */
@@ -29,6 +27,12 @@ async function fetchJSON<T>(url: string): Promise<T> {
   try { data = txt ? JSON.parse(txt) : null; } catch {}
   if (!res.ok) throw new Error((data?.error || data?.message) ?? `${res.status} ${res.statusText}`);
   return data as T;
+}
+
+function fmtMoney(n?: number|null) {
+  if (n == null) return '-';
+  try { return Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' }).format(n); }
+  catch { return String(n); }
 }
 
 /* ---------- Component ---------- */
@@ -480,13 +484,4 @@ function List({ items, cols, headers, empty }:{
     </div>
   );
 }
-
-function fmtMoney(n?: number|null) {
-  if (n == null) return '-';
-  try { return Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' }).format(n); }
-  catch { return String(n); }
-}
-
-  )
-}
->>>>>>> c064873 (	new file:   src/app/api/projects/board/route.ts)
+TSX
