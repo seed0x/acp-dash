@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { notion, DB_IDS } from '../../../../lib/notion' // <-- relative path, no @ alias
+import { notion, DB_IDS } from '../../../../lib/notion'
 
 export async function GET() {
   const out: any = {
@@ -10,7 +10,8 @@ export async function GET() {
   }
 
   try {
-    const me = await notion.users.me()
+    // ✅ Notion SDK requires an empty object here
+    const me = await notion.users.me({})
     out.me = { type: (me as any).type }
 
     for (const id of DB_IDS) {
@@ -32,4 +33,3 @@ export async function GET() {
 
   return NextResponse.json(out)
 }
-
