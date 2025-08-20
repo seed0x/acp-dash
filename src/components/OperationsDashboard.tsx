@@ -7,6 +7,18 @@ type ProjectRow = { id: string; title: string; client?: string; location?: strin
 type ImprovementRow = { id: string; title: string; status?: string; url?: string }
 type BidRow = ProjectRow
 
+async function fetchJSON<T>(url: string): Promise<T> {
+  const res = await fetch(url, { cache: 'no-store' })
+  const text = await res.text()
+  let data: any = null
+  try { data = text ? JSON.parse(text) : null } catch { /* not JSON */ }
+  if (!res.ok) {
+    const msg = (data && (data.error || data.message)) || `${res.status} ${res.statusText}`
+    throw new Error(`${url} → ${msg}`)
+  }
+  return data as T
+}
+
 export default function OperationsDashboard() {
   const [kpis, setKpis] = useState<KPI | null>(null)
   const [pendingAcct, setPendingAcct] = useState<ProjectRow[]>([])
@@ -14,6 +26,7 @@ export default function OperationsDashboard() {
   const [problems, setProblems] = useState<ImprovementRow[]>([])
   const [projects, setProjects] = useState<Array<{ id: string; title: string }>>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   // quick add upgrade form
   const [projectId, setProjectId] = useState('')
@@ -22,17 +35,22 @@ export default function OperationsDashboard() {
 
   const load = async () => {
     setLoading(true)
+    setError(null)
     try {
       const [k, p, b, pr, opts] = await Promise.all([
-        fetch('/api/dashboard/summary').then(r => r.json()).then(d => d.kpis as KPI),
-        fetch('/api/projects/job-account').then(r => r.json()).then(d => d.rows as ProjectRow[]),
-        fetch('/api/bids').then(r => r.json()).then(d => d.rows as BidRow[]),
-        fetch('/api/improvements?openOnly=true').then(r => r.json()).then(d => d.rows as ImprovementRow[]),
-        fetch('/api/projects/list').then(r => r.json()).then(d => d.rows as Array<{ id: string; title: string }>),
+        fetchJSON<{ kpis: KPI }>('/api/dashboard/summary').then(d => d.kpis),
+        fetchJSON<{ rows: ProjectRow[] }>('/api/projects/job-account').then(d => d.rows),
+        fetchJSON<{ rows: BidRow[] }>('/api/bids').then(d => d.rows),
+        fetchJSON<{ rows: ImprovementRow[] }>('/api/improvements?openOnly=true').then(d => d.rows),
+        fetchJSON<{ rows: Array<{ id: string; title: string }> }>('/api/projects/list').then(d => d.rows),
       ])
       setKpis(k); setPendingAcct(p); setBids(b); setProblems(pr); setProjects(opts)
       if (!projectId && opts[0]) setProjectId(opts[0].id)
-    } finally { setLoading(false) }
+    } catch (e: any) {
+      setError(e?.message || String(e))
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => { load() }, [])
@@ -48,17 +66,33 @@ export default function OperationsDashboard() {
   }, [bids])
 
   const addUpgrade = async () => {
-    if (!projectId || !upgradeTitle.trim()) return
-    await fetch('/api/improvements', {
-      method: 'POST',
-      body: JSON.stringify({ projectId, title: upgradeTitle, action: upgradeNotes })
-    })
-    setUpgradeTitle(''); setUpgradeNotes('')
-    await load()
+    setError(null)
+    try {
+      if (!projectId || !upgradeTitle.trim()) return
+      await fetch('/api/improvements', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId, title: upgradeTitle, action: upgradeNotes })
+      })
+      setUpgradeTitle(''); setUpgradeNotes('')
+      await load()
+    } catch (e: any) {
+      setError(e?.message || String(e))
+    }
   }
 
   return (
     <div className="space-y-6">
+      {error && (
+        <div className="p-3 rounded-lg border border-red-500/40 bg-red-950/40 text-sm">
+          <div className="font-semibold">Something went wrong</div>
+          <div className="mt-1">{error}</div>
+          <div className="mt-1">
+            Try <a className="underline" href="/api/health" target="_blank" rel="noreferrer">/api/health</a> to diagnose.
+          </div>
+        </div>
+      )}
+
       {/* KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Kpi title="Post & Beam" value={kpis?.postAndBeam ?? 0} />
@@ -83,8 +117,14 @@ export default function OperationsDashboard() {
                 {row.url && <a className="text-xs underline" href={row.url} target="_blank" rel="noreferrer">Open</a>}
                 <button className="px-3 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-sm"
                   onClick={async () => {
-                    await fetch('/api/projects/job-account', { method: 'PATCH', body: JSON.stringify({ id: row.id, value: true }) })
-                    await load()
+                    try {
+                      await fetch('/api/projects/job-account', {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ id: row.id, value: true })
+                      })
+                      await load()
+                    } catch (e: any) { setError(e?.message || String(e)) }
                   }}>
                   Mark Created
                 </button>
@@ -140,8 +180,14 @@ export default function OperationsDashboard() {
                 {p.url && <a className="text-xs underline" href={p.url} target="_blank" rel="noreferrer">Open</a>}
                 <button className="px-3 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-sm"
                   onClick={async () => {
-                    await fetch('/api/improvements', { method: 'PATCH', body: JSON.stringify({ id: p.id, status: 'Done' }) })
-                    await load()
+                    try {
+                      await fetch('/api/improvements', {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ id: p.id, status: 'Done' })
+                      })
+                      await load()
+                    } catch (e: any) { setError(e?.message || String(e)) }
                   }}>
                   Mark Done
                 </button>
