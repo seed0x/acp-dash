@@ -1,4 +1,3 @@
-// src/lib/notion-dashboard.ts
 import { Client } from '@notionhq/client'
 
 export const notion = new Client({ auth: process.env.NOTION_TOKEN })
@@ -33,16 +32,15 @@ type ProjKeys = {
   invoiced?: string
 }
 
-const schemaCache = new Map<string, ProjKeys>()
-function getPlain(rt: any) { return Array.isArray(rt) ? rt[0]?.plain_text : undefined }
+const projCache = new Map<string, ProjKeys>()
+const getPlain = (rt: any) => (Array.isArray(rt) ? rt[0]?.plain_text : undefined)
 
 async function getProjectKeys(): Promise<ProjKeys> {
   if (!PROJECTS_DB_ID) throw new Error('Missing NOTION_PROJECTS_DB_ID')
-  if (schemaCache.has(PROJECTS_DB_ID)) return schemaCache.get(PROJECTS_DB_ID)!
+  if (projCache.has(PROJECTS_DB_ID)) return projCache.get(PROJECTS_DB_ID)!
   const db = await notion.databases.retrieve({ database_id: PROJECTS_DB_ID })
   const props = (db as any).properties as Record<string, any>
   const keys: Partial<ProjKeys> = {}
-
   for (const [logical, cands] of Object.entries(PROJ_ALIASES) as Array<[keyof typeof PROJ_ALIASES, ReadonlyArray<string>]>) {
     const found = cands.find(k => props[k])
     if (found) (keys as any)[logical] = found
@@ -52,9 +50,22 @@ async function getProjectKeys(): Promise<ProjKeys> {
     if (auto) keys.title = auto
   }
   if (!keys.title) throw new Error('Projects DB: no title property')
-
-  schemaCache.set(PROJECTS_DB_ID, keys as ProjKeys)
+  projCache.set(PROJECTS_DB_ID, keys as ProjKeys)
   return keys as ProjKeys
+}
+
+// Generic pagination helper (Notion query)
+async function getAll<T>(fn: (cursor?: string) => Promise<{ results: T[]; has_more: boolean; next_cursor: string | null }>) {
+  let cursor: string | undefined = undefined
+  const out: T[] = []
+  // limit to reasonable pages to avoid runaway
+  for (let i = 0; i < 20; i++) {
+    const resp = await fn(cursor)
+    out.push(...resp.results)
+    if (!resp.has_more || !resp.next_cursor) break
+    cursor = resp.next_cursor
+  }
+  return out
 }
 
 export type ProjectItem = {
@@ -81,8 +92,8 @@ export async function listProjects(params?: { q?: string; status?: string }) {
   }
   if (q) {
     const or: any[] = []
-    if (keys.title)    or.push({ property: keys.title, title: { contains: q } })
-    if (keys.client)   or.push({ property: keys.client, rich_text: { contains: q } })
+    if (keys.title)    or.push({ property: keys.title,    title: { contains: q } })
+    if (keys.client)   or.push({ property: keys.client,   rich_text: { contains: q } })
     if (keys.location) or.push({ property: keys.location, rich_text: { contains: q } })
     if (or.length) and.push({ or })
   }
@@ -90,14 +101,17 @@ export async function listProjects(params?: { q?: string; status?: string }) {
   const filter = and.length ? { and } : undefined
   const sorts = keys.deadline ? [{ property: keys.deadline, direction: 'ascending' as const }] : undefined
 
-  const resp = await notion.databases.query({
-    database_id: PROJECTS_DB_ID,
-    ...(filter && { filter }),
-    ...(sorts && { sorts }),
-    page_size: 100,
-  })
+  const results = await getAll<any>((cursor) =>
+    notion.databases.query({
+      database_id: PROJECTS_DB_ID,
+      ...(filter && { filter }),
+      ...(sorts && { sorts }),
+      page_size: 100,
+      ...(cursor && { start_cursor: cursor }),
+    }) as any
+  )
 
-  const items: ProjectItem[] = resp.results
+  const items: ProjectItem[] = results
     .filter(p => p.object === 'page')
     .map((page: any) => {
       const p = page.properties
@@ -116,7 +130,7 @@ export async function listProjects(params?: { q?: string; status?: string }) {
       }
     })
 
-  // status options for filters/columns
+  // Status options for filters/columns
   let statusOptions: string[] = []
   try {
     const db = await notion.databases.retrieve({ database_id: PROJECTS_DB_ID })
@@ -128,21 +142,29 @@ export async function listProjects(params?: { q?: string; status?: string }) {
   return { items, statusOptions, keys }
 }
 
+export async function listProjectOptions() {
+  const keys = await getProjectKeys()
+  const all = await listProjects()
+  return all.items.map(i => ({ id: i.id, title: i.title })).sort((a, b) => a.title.localeCompare(b.title))
+}
+
 export async function countPostAndBeam() {
   const keys = await getProjectKeys()
   if (!keys.status) return 0
-  const resp = await notion.databases.query({
-    database_id: PROJECTS_DB_ID,
-    filter: { property: keys.status, select: { equals: 'Post & Beam' } },
-    page_size: 1
-  })
-  // Notion doesn't return total; quick client-side count: fetch first 100 and count
-  // For simplicity we return first page length
-  return resp.results.length
+  const results = await getAll<any>((cursor) =>
+    notion.databases.query({
+      database_id: PROJECTS_DB_ID,
+      filter: { property: keys.status, select: { equals: 'Post & Beam' } },
+      page_size: 100,
+      ...(cursor && { start_cursor: cursor }),
+    }) as any
+  )
+  return results.length
 }
 
 export async function listBids() {
   const { items } = await listProjects()
+  // Treat any status containing 'bid' or need follow-up as active bid
   const bids = items.filter(it =>
     (it.status && /bid/i.test(it.status)) || it.followUp === true
   )
@@ -212,13 +234,16 @@ export async function listImprovements(params?: { projectId?: string; openOnly?:
   }
   const filter = and.length ? { and } : undefined
 
-  const resp = await notion.databases.query({
-    database_id: IMPROVEMENTS_DB_ID,
-    ...(filter && { filter }),
-    page_size: 100,
-  })
+  const results = await getAll<any>((cursor) =>
+    notion.databases.query({
+      database_id: IMPROVEMENTS_DB_ID,
+      ...(filter && { filter }),
+      page_size: 100,
+      ...(cursor && { start_cursor: cursor }),
+    }) as any
+  )
 
-  const items: ImprovementItem[] = resp.results
+  let items: ImprovementItem[] = results
     .filter(p => p.object === 'page')
     .map((page: any) => {
       const p = page.properties
@@ -233,7 +258,7 @@ export async function listImprovements(params?: { projectId?: string; openOnly?:
     })
 
   if (params?.openOnly && keys.status) {
-    return items.filter(i => !/done|resolved|closed|complete/i.test(i.status || ''))
+    items = items.filter(i => !/done|resolved|closed|complete/i.test(i.status || ''))
   }
   return items
 }
@@ -245,8 +270,7 @@ export async function createImprovement(input: { projectId: string; title: strin
   }
   if (keys.project) props[keys.project] = { relation: [{ id: input.projectId }] }
   if (keys.action && input.action) props[keys.action] = { rich_text: [{ text: { content: input.action } }] }
-  // default status to "Open" if the DB has an option named Open
-  if (keys.status) props[keys.status] = { select: { name: 'Open' } }
+  if (keys.status) props[keys.status] = { select: { name: 'Open' } } // will create option if needed
   const page = await notion.pages.create({ parent: { database_id: IMPROVEMENTS_DB_ID }, properties: props })
   return page.id
 }
@@ -256,3 +280,4 @@ export async function updateImprovementStatus(pageId: string, newStatus: string)
   if (!keys.status) throw new Error('Improvements DB has no Status')
   await notion.pages.update({ page_id: pageId, properties: { [keys.status]: { select: { name: newStatus } } } })
 }
+
