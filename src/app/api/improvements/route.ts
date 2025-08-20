@@ -1,36 +1,60 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { listImprovements, createImprovement, updateImprovementStatus } from '@/lib/notion-dashboard'
+// src/app/api/improvements/route.ts
+import { NextResponse } from 'next/server'
+import {
+  listImprovements,
+  createImprovement,
+  updateImprovementStatus,
+} from '@/lib/notion-dashboard'
 
-export async function GET(req: NextRequest) {
+// GET /api/improvements?openOnly=true&projectId=<id>
+export async function GET(req: Request) {
   try {
-    const { searchParams } = new URL(req.url)
-    const projectId = searchParams.get('projectId') || undefined
-    const openOnly = searchParams.get('openOnly') === 'true'
-    const rows = await listImprovements({ projectId, openOnly })
+    const url = new URL(req.url)
+    const projectId = url.searchParams.get('projectId') || undefined
+    const openOnly = url.searchParams.get('openOnly') === 'true'
+
+    // library expects a boolean, not an object
+    let rows = await listImprovements(openOnly)
+
+    // optional filtering client-side by project
+    if (projectId) rows = rows.filter(r => r.projectId === projectId)
+
     return NextResponse.json({ rows })
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 400 })
+    return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 })
   }
 }
 
-export async function POST(req: NextRequest) {
+// POST /api/improvements
+// body: { projectId?: string, title: string, action?: string }
+export async function POST(req: Request) {
   try {
-    const { projectId, title, action } = await req.json() as { projectId: string; title: string; action?: string }
-    if (!projectId || !title) throw new Error('projectId and title required')
-    const id = await createImprovement({ projectId, title, action })
-    return NextResponse.json({ id })
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 400 })
-  }
-}
-
-export async function PATCH(req: NextRequest) {
-  try {
-    const { id, status } = await req.json() as { id: string; status: string }
-    if (!id || !status) throw new Error('id and status required')
-    await updateImprovementStatus(id, status)
+    const body = await req.json()
+    if (!body?.title || typeof body.title !== 'string') {
+      return NextResponse.json({ error: 'title is required' }, { status: 400 })
+    }
+    await createImprovement({
+      projectId: body.projectId,
+      title: body.title,
+      action: body.action,
+    })
     return NextResponse.json({ ok: true })
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 400 })
+    return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 })
+  }
+}
+
+// PATCH /api/improvements
+// body: { id: string, status: string }
+export async function PATCH(req: Request) {
+  try {
+    const body = await req.json()
+    if (!body?.id || !body?.status) {
+      return NextResponse.json({ error: 'id and status are required' }, { status: 400 })
+    }
+    await updateImprovementStatus(body.id, body.status)
+    return NextResponse.json({ ok: true })
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 })
   }
 }
