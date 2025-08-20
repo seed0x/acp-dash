@@ -1,28 +1,23 @@
-/* --- UI polish --- */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* --- App theme + helpers --- */
 :root {
   --bg: #0B1120;
   --surface: rgba(255,255,255,0.06);
-<<<<<<< HEAD
-<<<<<<< HEAD
-  --border: rgba(255,255,255,0.1);
+  --surface-2: rgba(255,255,255,0.08);
+  --border: rgba(255,255,255,0.10);
   --muted: #a3a3a3;
 }
-.container-responsive { width: min(1200px, 100%); margin-inline: auto; }
-.card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; }
-.btn { border-radius: 10px; border: 1px solid var(--border); background: #1f2937; padding: 6px 12px; font-size: .875rem; }
-.btn:hover { background: #2b3342; }
-.btn-primary { background: #059669; border-color: transparent; }
-.btn-primary:hover { background: #10b981; }
-.skeleton { position: relative; overflow: hidden; background: rgba(255,255,255,0.08); }
-.skeleton::after { content:""; position:absolute; inset:0; transform:translateX(-100%);
-  background:linear-gradient(90deg,transparent,rgba(255,255,255,0.12),transparent); animation:shimmer 1.2s infinite; }
-@keyframes shimmer { 100% { transform: translateX(100%);} }
-=======
-=======
->>>>>>> ca8fb6a (wip)
-  --surface-2: rgba(255,255,255,0.08);
-  --border: rgba(255,255,255,0.1);
-  --muted: #a3a3a3;
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg);
+  color: #fff;
 }
 
 .container-responsive {
@@ -51,10 +46,12 @@
 }
 .btn-primary:hover { background: #10b981; }
 
+/* skeleton loading shimmer */
 .skeleton {
   position: relative;
   overflow: hidden;
   background: rgba(255,255,255,0.08);
+  border-radius: 10px;
 }
 .skeleton::after {
   content: "";
@@ -64,26 +61,5 @@
   background: linear-gradient(90deg, transparent, rgba(255,255,255,0.12), transparent);
   animation: shimmer 1.2s infinite;
 }
-@keyframes shimmer {
-  100% { transform: translateX(100%); }
-}
-
-<<<<<<< HEAD
->>>>>>> a4d7c43 (Update globals.css)
-=======
-=======
-  --border: rgba(255,255,255,0.1);
-  --muted: #a3a3a3;
-}
-.container-responsive { width: min(1200px, 100%); margin-inline: auto; }
-.card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; }
-.btn { border-radius: 10px; border: 1px solid var(--border); background: #1f2937; padding: 6px 12px; font-size: .875rem; }
-.btn:hover { background: #2b3342; }
-.btn-primary { background: #059669; border-color: transparent; }
-.btn-primary:hover { background: #10b981; }
-.skeleton { position: relative; overflow: hidden; background: rgba(255,255,255,0.08); }
-.skeleton::after { content:""; position:absolute; inset:0; transform:translateX(-100%);
-  background:linear-gradient(90deg,transparent,rgba(255,255,255,0.12),transparent); animation:shimmer 1.2s infinite; }
-@keyframes shimmer { 100% { transform: translateX(100%);} }
->>>>>>> c064873 (	new file:   src/app/api/projects/board/route.ts)
->>>>>>> ca8fb6a (wip)
+@keyframes shimmer { 100% { transform: translateX(100%); } }
+CSS
