@@ -22,6 +22,7 @@ const PROJ_ALIASES = {
 type ProjKeys = {
   title: string
   status?: string
+  statusKind?: 'status' | 'select' | 'multi_select'
   client?: string
   location?: string
   deadline?: string
@@ -31,6 +32,7 @@ type ProjKeys = {
   spent?: string
   invoiced?: string
 }
+
 
 const projCache = new Map<string, ProjKeys>()
 const getPlain = (rt: any) => (Array.isArray(rt) ? rt[0]?.plain_text : undefined)
@@ -45,6 +47,8 @@ async function getProjectKeys(): Promise<ProjKeys> {
     const found = cands.find(k => props[k])
     if (found) (keys as any)[logical] = found
   }
+  if (keys.status) (keys as any).statusKind = (props[keys.status] as any)?.type as any
+
   if (!keys.title) {
     const auto = Object.entries(props).find(([, v]: any) => v?.type === 'title')?.[0]
     if (auto) keys.title = auto
@@ -88,7 +92,8 @@ export async function listProjects(params?: { q?: string; status?: string }) {
   const q = params?.q?.trim()
 
   if (params?.status && params.status !== 'All' && keys.status) {
-    and.push({ property: keys.status, select: { equals: params.status } })
+    const discriminator = keys.statusKind === 'status' ? 'status' : 'select'
+    and.push({ property: keys.status, [discriminator]: { equals: params.status } })
   }
   if (q) {
     const or: any[] = []
@@ -115,10 +120,16 @@ export async function listProjects(params?: { q?: string; status?: string }) {
     .filter(p => p.object === 'page')
     .map((page: any) => {
       const p = page.properties
+      const statusVal =
+        keys.status
+          ? (keys.statusKind === 'status'
+              ? p[keys.status]?.status?.name
+              : p[keys.status]?.select?.name)
+          : undefined
       return {
         id: page.id,
         title: p[keys.title!]?.title?.[0]?.plain_text ?? 'Untitled',
-        status: keys.status ? p[keys.status]?.select?.name : undefined,
+        status: statusVal,
         client: keys.client ? getPlain(p[keys.client]?.rich_text) : undefined,
         location: keys.location ? getPlain(p[keys.location]?.rich_text) : undefined,
         deadline: keys.deadline ? (p[keys.deadline]?.date?.start ?? null) : null,
@@ -135,12 +146,14 @@ export async function listProjects(params?: { q?: string; status?: string }) {
   try {
     const db = await notion.databases.retrieve({ database_id: PROJECTS_DB_ID })
     const prop = keys.status ? (db as any).properties[keys.status] : null
-    if (prop?.type === 'select') statusOptions = (prop.select?.options || []).map((o: any) => o.name)
+    if (prop?.type === 'select')    statusOptions = (prop.select?.options || []).map((o: any) => o.name)
+    else if (prop?.type === 'status') statusOptions = (prop.status?.options || []).map((o: any) => o.name)
   } catch {}
   if (!statusOptions.length) statusOptions = Array.from(new Set(items.map(i => i.status).filter(Boolean))) as string[]
 
   return { items, statusOptions, keys }
 }
+
 
 export async function listProjectOptions() {
   const keys = await getProjectKeys()
@@ -151,18 +164,20 @@ export async function listProjectOptions() {
 export async function countPostAndBeam() {
   const keys = await getProjectKeys()
   if (!keys.status) return 0
-  const statusProp: string = keys.status // narrow to string for the closure
+  const statusProp = keys.status
+  const discriminator = keys.statusKind === 'status' ? 'status' : 'select'
 
   const results = await getAll<any>((cursor) =>
     notion.databases.query({
       database_id: PROJECTS_DB_ID,
-      filter: { property: statusProp, select: { equals: 'Post & Beam' } },
+      filter: { property: statusProp, [discriminator]: { equals: 'Post & Beam' } },
       page_size: 100,
       ...(cursor && { start_cursor: cursor }),
     }) as any
   )
   return results.length
 }
+
 
 
 export async function listBids() {
@@ -283,5 +298,6 @@ export async function updateImprovementStatus(pageId: string, newStatus: string)
   if (!keys.status) throw new Error('Improvements DB has no Status')
   await notion.pages.update({ page_id: pageId, properties: { [keys.status]: { select: { name: newStatus } } } })
 }
+
 
 
