@@ -164,19 +164,28 @@ export async function listProjectOptions() {
 export async function countPostAndBeam() {
   const keys = await getProjectKeys()
   if (!keys.status) return 0
-  const statusProp = keys.status
+
+  const statusProp: string = keys.status
   const discriminator = keys.statusKind === 'status' ? 'status' : 'select'
+
+  // Build the dynamic filter separately so TS doesn't choke
+  const statusFilter: any = {
+    property: statusProp,
+    [discriminator]: { equals: 'Post & Beam' } // <-- change label if your option text differs
+  }
 
   const results = await getAll<any>((cursor) =>
     notion.databases.query({
       database_id: PROJECTS_DB_ID,
-      filter: { property: statusProp, [discriminator]: { equals: 'Post & Beam' } },
+      filter: statusFilter,
       page_size: 100,
       ...(cursor && { start_cursor: cursor }),
     }) as any
   )
+
   return results.length
 }
+
 
 
 
@@ -321,6 +330,7 @@ export async function updateImprovementStatus(pageId: string, newStatus: string)
     : { select: { name: newStatus } }
   await notion.pages.update({ page_id: pageId, properties: { [keys.status]: payload } })
 }
+
 
 
 
