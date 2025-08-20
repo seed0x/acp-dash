@@ -212,24 +212,35 @@ const IMP_ALIASES = {
   action:  ['Action', 'Notes', 'Description'] as const,
 }
 
-type ImpKeys = { title: string; status?: string; project?: string; action?: string }
+type ImpKeys = {
+  title: string
+  status?: string
+  statusKind?: 'status' | 'select' | 'multi_select'
+  project?: string
+  action?: string
+}
+
 const impCache = new Map<string, ImpKeys>()
 
 async function getImprovementKeys(): Promise<ImpKeys> {
   if (!IMPROVEMENTS_DB_ID) throw new Error('Missing NOTION_IMPROVEMENTS_DB_ID')
   if (impCache.has(IMPROVEMENTS_DB_ID)) return impCache.get(IMPROVEMENTS_DB_ID)!
   const db = await notion.databases.retrieve({ database_id: IMPROVEMENTS_DB_ID })
-  const props = (db as any).properties
+  const props = (db as any).properties as Record<string, any>
   const keys: Partial<ImpKeys> = {}
+
   for (const [logical, cands] of Object.entries(IMP_ALIASES) as Array<[keyof typeof IMP_ALIASES, ReadonlyArray<string>]>) {
     const found = cands.find(k => props[k])
     if (found) (keys as any)[logical] = found
   }
+  if (keys.status) (keys as any).statusKind = (props[keys.status] as any)?.type as any
+
   if (!keys.title) {
     const auto = Object.entries(props).find(([, v]: any) => v?.type === 'title')?.[0]
     if (auto) keys.title = auto
   }
   if (!keys.title) throw new Error('Improvements DB: no title property')
+
   impCache.set(IMPROVEMENTS_DB_ID, keys as ImpKeys)
   return keys as ImpKeys
 }
@@ -268,9 +279,14 @@ export async function listImprovements(params?: { projectId?: string; openOnly?:
       return {
         id: page.id,
         title: p[keys.title!]?.title?.[0]?.plain_text ?? 'Untitled',
-        status: keys.status ? p[keys.status]?.select?.name : undefined,
+        // 👇 THIS is the line you asked about — it supports Notion "status" OR "select"
+        status: keys.status
+          ? (keys.statusKind === 'status'
+              ? p[keys.status]?.status?.name
+              : p[keys.status]?.select?.name)
+          : undefined,
         projectId: keys.project ? p[keys.project]?.relation?.[0]?.id : undefined,
-        action: keys.action ? getPlain(p[keys.action]?.rich_text) : undefined,
+        action: keys.action ? (Array.isArray(p[keys.action]?.rich_text) ? p[keys.action].rich_text[0]?.plain_text : undefined) : undefined,
         url: page.url,
       }
     })
@@ -288,7 +304,11 @@ export async function createImprovement(input: { projectId: string; title: strin
   }
   if (keys.project) props[keys.project] = { relation: [{ id: input.projectId }] }
   if (keys.action && input.action) props[keys.action] = { rich_text: [{ text: { content: input.action } }] }
-  if (keys.status) props[keys.status] = { select: { name: 'Open' } } // will create option if needed
+  if (keys.status) {
+    props[keys.status] = keys.statusKind === 'status'
+      ? { status: { name: 'Open' } }
+      : { select: { name: 'Open' } }
+  }
   const page = await notion.pages.create({ parent: { database_id: IMPROVEMENTS_DB_ID }, properties: props })
   return page.id
 }
@@ -296,8 +316,13 @@ export async function createImprovement(input: { projectId: string; title: strin
 export async function updateImprovementStatus(pageId: string, newStatus: string) {
   const keys = await getImprovementKeys()
   if (!keys.status) throw new Error('Improvements DB has no Status')
-  await notion.pages.update({ page_id: pageId, properties: { [keys.status]: { select: { name: newStatus } } } })
+  const payload = keys.statusKind === 'status'
+    ? { status: { name: newStatus } }
+    : { select: { name: newStatus } }
+  await notion.pages.update({ page_id: pageId, properties: { [keys.status]: payload } })
 }
+
+
 
 
 
