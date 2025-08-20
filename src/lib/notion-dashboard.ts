@@ -1,493 +1,303 @@
 // src/lib/notion-dashboard.ts
-import { Client } from '@notionhq/client'
+import { Client } from '@notionhq/client';
 
-export const notion = new Client({ auth: process.env.NOTION_TOKEN })
+if (!process.env.NOTION_TOKEN) {
+  console.warn('NOTION_TOKEN is not set. /api/* will return 401.');
+}
 
-export const PROJECTS_DB_ID = (process.env.NOTION_PROJECTS_DB_ID || '').trim()
-export const IMPROVEMENTS_DB_ID = (process.env.NOTION_IMPROVEMENTS_DB_ID || '').trim()
+export const notion = new Client({ auth: process.env.NOTION_TOKEN ?? undefined });
 
-// optional, for richer "job details"
-export const TASKS_DB_ID     = (process.env.NOTION_TASKS_DB_ID || '').trim()
-export const EXPENSES_DB_ID  = (process.env.NOTION_EXPENSES_DB_ID || '').trim()
-export const TIME_DB_ID      = (process.env.NOTION_TIME_DB_ID || '').trim()
-export const NOTES_DB_ID     = (process.env.NOTION_NOTES_DB_ID || '').trim()
-export const DOCS_DB_ID      = (process.env.NOTION_DOCS_DB_ID || '').trim()
+/**
+ * === Your database IDs (from your dump) ===
+ */
+export const DB = {
+  projects: '223333490a11817390abe4872289edaf',
+  tasks: '223333490a118175b75cedd489d8fc9e',
+  clients: '223333490a11815fb8dfed884cb88a09',
+  expenses: '223333490a118162b8dec59721702e1c',
+  improvements: '223333490a1181efbdefdf74b0b4f6a6',
+  docs: '223333490a11816bbcd0f0aedc40628c',
+  software: '223333490a1181a49c3bc4d3e7a085ff', // not used below
+  time: '223333490a11819cbe48f931fa6ad4b2',
+  notes: '223333490a1181898ee6c4e52f1d07cb',
+} as const;
 
-// ---------- Shared helpers ----------
-const getPlain = (rt: any) => (Array.isArray(rt) ? rt[0]?.plain_text : undefined)
+type PropMap = Record<string, any>;
+type DbMeta = {
+  id: string;
+  title: string;
+  props: PropMap;
+};
 
-async function getAll<T>(
-  fn: (cursor?: string) => Promise<{ results: T[]; has_more: boolean; next_cursor: string | null }>
-) {
-  let cursor: string | undefined = undefined
-  const out: T[] = []
-  for (let i = 0; i < 20; i++) {
-    const resp = await fn(cursor)
-    out.push(...resp.results)
-    if (!resp.has_more || !resp.next_cursor) break
-    cursor = resp.next_cursor as any
+const cache: Record<string, DbMeta> = {};
+
+/** Load & cache db metadata */
+async function getDbMeta(id: string): Promise<DbMeta> {
+  if (cache[id]) return cache[id];
+  const db: any = await notion.databases.retrieve({ database_id: id as string });
+  const title = (db?.title?.[0]?.plain_text ?? '').trim();
+  const meta: DbMeta = { id, title, props: db?.properties ?? {} };
+  cache[id] = meta;
+  return meta;
+}
+
+/** pick first candidate prop that exists on a DB */
+function pickProp(props: PropMap, candidates: string[]): string | undefined {
+  for (const c of candidates) if (props[c]) return c;
+  return undefined;
+}
+
+/** Get project property keys (flexible names) + kinds */
+async function getProjectKeys() {
+  const meta = await getDbMeta(DB.projects);
+  const p = meta.props;
+
+  const title = pickProp(p, ['Project', 'Title', 'Name']) ?? Object.keys(p).find(k => p[k]?.type === 'title');
+  const status = pickProp(p, ['Status', 'Status 1']) ?? Object.keys(p).find(k => ['select', 'status'].includes(p[k]?.type));
+  const statusKind = status ? p[status].type : undefined; // 'status' or 'select'
+  const client = pickProp(p, ['Client']);
+  const location = pickProp(p, ['Location', 'Address', 'Job Address', 'Sub-Division']);
+  const deadline = pickProp(p, ['Deadline']);
+  const followUp = pickProp(p, ['Need follow-up']);
+  const jobAccount = pickProp(p, ['Job Account Setup']);
+  const budget = pickProp(p, ['Budget']);
+  const spent = pickProp(p, ['Spent', 'Budget spent']);
+
+  return { title, status, statusKind, client, location, deadline, followUp, jobAccount, budget, spent, props: p };
+}
+
+/** Helpers to read Notion values safely */
+function textOf(prop: any): string | undefined {
+  if (!prop) return undefined;
+  if (prop.type === 'title' || prop.type === 'rich_text') {
+    const arr = prop[prop.type] as any[];
+    return (arr ?? []).map(x => x?.plain_text ?? '').join('').trim() || undefined;
   }
-  return out
-}
-
-// ---------- Projects ----------
-const PROJ_ALIASES = {
-  title:     ['Project', 'Name', 'Title'] as const,
-  status:    ['Status', 'Status 1', 'Construction Phase', 'Stage', 'State'] as const,
-  client:    ['Client', 'Customer', 'Company'] as const,
-  location:  ['Location', 'Address', 'Job Address', 'Site'] as const,
-  deadline:  ['Deadline', 'Due Date', 'Due', 'Target Date', 'Date', 'Start Date'] as const,
-  jobAcct:   ['Job Account Setup', 'Job Account Created'] as const,
-  followUp:  ['Need follow-up'] as const,
-  budget:    ['Budget', 'Total value'] as const,
-  spent:     ['Spent', 'Total expenses', 'Expenses'] as const,
-  invoiced:  ['Invoiced'] as const,
-}
-type ProjKeys = {
-  title: string
-  status?: string
-  statusKind?: 'status' | 'select' | 'multi_select'
-  client?: string
-  location?: string
-  deadline?: string
-  jobAcct?: string
-  followUp?: string
-  budget?: string
-  spent?: string
-  invoiced?: string
-}
-const projCache = new Map<string, ProjKeys>()
-
-async function getProjectKeys(): Promise<ProjKeys> {
-  if (!PROJECTS_DB_ID) throw new Error('Missing NOTION_PROJECTS_DB_ID')
-  if (projCache.has(PROJECTS_DB_ID)) return projCache.get(PROJECTS_DB_ID)!
-  const db = await notion.databases.retrieve({ database_id: PROJECTS_DB_ID })
-  const props = (db as any).properties as Record<string, any>
-  const keys: Partial<ProjKeys> = {}
-
-  for (const [logical, cands] of Object.entries(PROJ_ALIASES) as Array<[keyof typeof PROJ_ALIASES, ReadonlyArray<string>]>) {
-    const found = cands.find(k => props[k])
-    if (found) (keys as any)[logical] = found
+  if (prop.type === 'formula') {
+    const f = prop.formula;
+    if (f.type === 'string') return f.string ?? undefined;
+    if (f.type === 'number') return String(f.number ?? '');
   }
-  if (keys.status) (keys as any).statusKind = (props[keys.status] as any)?.type as any
-
-  if (!keys.title) {
-    const auto = Object.entries(props).find(([, v]: any) => v?.type === 'title')?.[0]
-    if (auto) keys.title = auto
-  }
-  if (!keys.title) throw new Error('Projects DB: no title property')
-  projCache.set(PROJECTS_DB_ID, keys as ProjKeys)
-  return keys as ProjKeys
+  return undefined;
+}
+function selectName(prop: any): string | undefined {
+  if (!prop) return undefined;
+  if (prop.type === 'select') return prop.select?.name;
+  if (prop.type === 'status') return prop.status?.name;
+  return undefined;
+}
+function numberVal(prop: any): number | undefined {
+  if (!prop) return undefined;
+  if (prop.type === 'number') return prop.number ?? undefined;
+  if (prop.type === 'rollup' && prop.rollup?.type === 'number') return prop.rollup.number ?? undefined;
+  return undefined;
+}
+function dateStr(prop: any): string | undefined {
+  if (!prop) return undefined;
+  if (prop.type === 'date') return prop.date?.start ?? undefined;
+  return undefined;
+}
+function checkbox(prop: any): boolean | undefined {
+  if (!prop) return undefined;
+  if (prop.type === 'checkbox') return !!prop.checkbox;
+  return undefined;
 }
 
-export type ProjectItem = {
-  id: string
-  title: string
-  status?: string
-  client?: string
-  location?: string
-  deadline?: string | null
-  jobAccount?: boolean | null
-  followUp?: boolean | null
-  budget?: number | null
-  spent?: number | null
-  url?: string
+/** Build a NOTION filter for "contains" depending on property type */
+function containsFilter(propName: string, kind: string | undefined, q: string) {
+  if (!propName) return undefined;
+  if (kind === 'title') return { property: propName, title: { contains: q } };
+  if (kind === 'rich_text') return { property: propName, rich_text: { contains: q } };
+  // If unknown, try both (Notion will error if wrong; we guard by knowing kinds below)
+  return { property: propName, rich_text: { contains: q } } as any;
 }
 
-export async function listProjects(params?: { q?: string; status?: string }) {
-  const keys = await getProjectKeys()
-  const and: any[] = []
-  const q = params?.q?.trim()
+/** Query all pages of a database with optional filter (simple paginator) */
+async function queryAll(dbId: string, body: any) {
+  let results: any[] = [];
+  let cursor: string | undefined;
+  do {
+    const resp: any = await notion.databases.query({ database_id: dbId, ...body, ...(cursor ? { start_cursor: cursor } : {}) });
+    results = results.concat(resp.results || []);
+    cursor = resp.has_more ? resp.next_cursor : undefined;
+  } while (cursor);
+  return results;
+}
 
-  if (params?.status && params.status !== 'All' && keys.status) {
-    const discriminator = keys.statusKind === 'status' ? 'status' : 'select'
-    and.push({ property: keys.status, [discriminator]: { equals: params.status } })
-  }
-  if (q) {
-    const or: any[] = []
-    if (keys.title)    or.push({ property: keys.title,    title: { contains: q } })
-    if (keys.client)   or.push({ property: keys.client,   rich_text: { contains: q } })
-    if (keys.location) or.push({ property: keys.location, rich_text: { contains: q } })
-    if (or.length) and.push({ or })
+/** List projects for board with server-side search + status filter */
+export async function listProjectsBoard(params: { q?: string; status?: string }) {
+  const { q, status } = params;
+  const keys = await getProjectKeys();
+  const filtersAnd: any[] = [];
+  const or: any[] = [];
+
+  if (q && q.trim()) {
+    const tKind = keys.title ? 'title' : undefined;
+    if (keys.title) or.push(containsFilter(keys.title, tKind, q.trim()));
+    if (keys.location) or.push(containsFilter(keys.location, 'rich_text', q.trim()));
+    // If there’s no valid OR entry, skip OR
+    if (or.length) filtersAnd.push({ or });
   }
 
-  const filter = and.length ? { and } : undefined
-  const sorts = keys.deadline ? [{ property: keys.deadline, direction: 'ascending' as const }] : undefined
+  if (status && status !== 'All' && keys.status) {
+    const discriminator = keys.statusKind === 'status' ? 'status' : 'select';
+    filtersAnd.push({ property: keys.status, [discriminator]: { equals: status } });
+  }
 
-  const results = await getAll<any>((cursor) =>
-    notion.databases.query({
-      database_id: PROJECTS_DB_ID,
-      ...(filter && { filter }),
-      ...(sorts && { sorts }),
-      page_size: 100,
-      ...(cursor && { start_cursor: cursor }),
-    }) as any
-  )
+  const pages = await queryAll(DB.projects, {
+    filter: filtersAnd.length ? { and: filtersAnd } : undefined,
+    page_size: 100,
+    sorts: keys.status ? [{ property: keys.status, direction: 'ascending' as const }] : undefined,
+  });
 
-  const items: ProjectItem[] = results
-    .filter(p => p.object === 'page')
-    .map((page: any) => {
-      const p = page.properties
-      const statusVal =
-        keys.status
-          ? (keys.statusKind === 'status'
-              ? p[keys.status]?.status?.name
-              : p[keys.status]?.select?.name)
-          : undefined
-      return {
-        id: page.id,
-        title: p[keys.title!]?.title?.[0]?.plain_text ?? 'Untitled',
-        status: statusVal,
-        client: keys.client ? getPlain(p[keys.client]?.rich_text) : undefined,
-        location: keys.location ? getPlain(p[keys.location]?.rich_text) : undefined,
-        deadline: keys.deadline ? (p[keys.deadline]?.date?.start ?? null) : null,
-        jobAccount: keys.jobAcct ? Boolean(p[keys.jobAcct]?.checkbox) : null,
-        followUp: keys.followUp ? Boolean(p[keys.followUp]?.checkbox) : null,
-        budget: keys.budget ? (p[keys.budget]?.number ?? null) : null,
-        spent: keys.spent ? (p[keys.spent]?.number ?? null) : null,
-        url: page.url
-      }
-    })
+  const items = pages.map((pg: any) => {
+    const p = pg.properties || {};
+    return {
+      id: pg.id,
+      title: keys.title ? textOf(p[keys.title]) : 'Untitled',
+      status: keys.status ? selectName(p[keys.status]) : undefined,
+      client: keys.client ? (p[keys.client]?.relation?.length ? `${p[keys.client].relation.length} client(s)` : textOf(p[keys.client])) : undefined,
+      location: keys.location ? textOf(p[keys.location]) : undefined,
+    };
+  });
 
-  // Status options
-  let statusOptions: string[] = []
-  try {
-    const db = await notion.databases.retrieve({ database_id: PROJECTS_DB_ID })
-    const prop = keys.status ? (db as any).properties[keys.status] : null
-    if (prop?.type === 'select')    statusOptions = (prop.select?.options || []).map((o: any) => o.name)
-    else if (prop?.type === 'status') statusOptions = (prop.status?.options || []).map((o: any) => o.name)
-  } catch {}
-  if (!statusOptions.length) statusOptions = Array.from(new Set(items.map(i => i.status).filter(Boolean))) as string[]
+  // collect unique status options for filter dropdown
+  const statusOptions: string[] = [];
+  for (const pg of pages) {
+    const s = keys.status ? selectName(pg.properties?.[keys.status]) : undefined;
+    if (s && !statusOptions.includes(s)) statusOptions.push(s);
+  }
+  statusOptions.sort((a, b) => a.localeCompare(b));
 
-  return { items, statusOptions, keys }
+  return { items, statusOptions };
 }
 
-export async function listProjectOptions() {
-  const all = await listProjects()
-  return all.items.map(i => ({ id: i.id, title: i.title })).sort((a, b) => a.title.localeCompare(b.title))
+/** Find the relation property on a DB that points to Projects DB */
+async function relationToProjectsProp(dbId: string): Promise<string | undefined> {
+  const meta = await getDbMeta(dbId);
+  for (const [name, cfg] of Object.entries<any>(meta.props)) {
+    if (cfg?.type === 'relation' && cfg?.relation?.database_id === DB.projects) return name;
+  }
+  // fallback: common names
+  return pickProp(meta.props, ['Projects', 'Project']);
 }
 
-export async function countPostAndBeam() {
-  const keys = await getProjectKeys()
-  if (!keys.status) return 0
-  const statusProp: string = keys.status
-  const discriminator = keys.statusKind === 'status' ? 'status' : 'select'
-  const statusFilter: any = { property: statusProp, [discriminator]: { equals: 'Post & Beam' } }
-  const results = await getAll<any>((cursor) =>
-    notion.databases.query({
-      database_id: PROJECTS_DB_ID,
-      filter: statusFilter,
-      page_size: 100,
-      ...(cursor && { start_cursor: cursor }),
-    }) as any
-  )
-  return results.length
-}
+/** Get one project + all linked data across other DBs */
+export async function getProjectFull(projectId: string) {
+  const keys = await getProjectKeys();
+  const page: any = await notion.pages.retrieve({ page_id: projectId });
 
-export async function listBids() {
-  const { items } = await listProjects()
-  return items.filter(it => (it.status && /bid/i.test(it.status)) || it.followUp === true)
-}
-
-export async function listJobAccountPending() {
-  const { items, keys } = await listProjects()
-  if (!keys.jobAcct) return []
-  return items.filter(it => it.jobAccount === false || it.jobAccount === null)
-}
-
-export async function toggleJobAccount(pageId: string, value: boolean) {
-  const keys = await getProjectKeys()
-  if (!keys.jobAcct) throw new Error('Projects DB has no "Job Account Setup" checkbox')
-  await notion.pages.update({ page_id: pageId, properties: { [keys.jobAcct]: { checkbox: value } } })
-}
-
-// Get one project by id (for the details panel)
-export async function getProjectById(pageId: string): Promise<ProjectItem> {
-  const keys = await getProjectKeys()
-  const page: any = await notion.pages.retrieve({ page_id: pageId })
-  const p = page.properties
-  const statusVal =
-    keys.status
-      ? (keys.statusKind === 'status'
-          ? p[keys.status]?.status?.name
-          : p[keys.status]?.select?.name)
-      : undefined
-  return {
+  const p = page.properties || {};
+  const project = {
     id: page.id,
-    title: p[keys.title!]?.title?.[0]?.plain_text ?? 'Untitled',
-    status: statusVal,
-    client: keys.client ? getPlain(p[keys.client]?.rich_text) : undefined,
-    location: keys.location ? getPlain(p[keys.location]?.rich_text) : undefined,
-    deadline: keys.deadline ? (p[keys.deadline]?.date?.start ?? null) : null,
-    jobAccount: keys.jobAcct ? Boolean(p[keys.jobAcct]?.checkbox) : null,
-    followUp: keys.followUp ? Boolean(p[keys.followUp]?.checkbox) : null,
-    budget: keys.budget ? (p[keys.budget]?.number ?? null) : null,
-    spent: keys.spent ? (p[keys.spent]?.number ?? null) : null,
-    url: page.url
-  }
-}
+    title: keys.title ? textOf(p[keys.title]) : 'Untitled',
+    status: keys.status ? selectName(p[keys.status]) : undefined,
+    client: keys.client ? (p[keys.client]?.relation?.length ? `${p[keys.client].relation.length} client(s)` : textOf(p[keys.client])) : undefined,
+    location: keys.location ? textOf(p[keys.location]) : undefined,
+    deadline: keys.deadline ? dateStr(p[keys.deadline]) : undefined,
+    followUp: keys.followUp ? checkbox(p[keys.followUp]) : undefined,
+    jobAccount: keys.jobAccount ? checkbox(p[keys.jobAccount]) : undefined,
+    budget: keys.budget ? numberVal(p[keys.budget]) : undefined,
+    spent: keys.spent ? numberVal(p[keys.spent]) : undefined,
+  };
 
-// ---------- Improvements (Upgrades / Problems) ----------
-const IMP_ALIASES = {
-  title:   ['Improvement', 'Title', 'Name'] as const,
-  status:  ['Status', 'State'] as const,
-  project: ['Projects', 'Project'] as const,
-  action:  ['Action', 'Notes', 'Description'] as const,
-}
-type ImpKeys = { title: string; status?: string; statusKind?: 'status'|'select'|'multi_select'; project?: string; action?: string }
-const impCache = new Map<string, ImpKeys>()
-
-async function getImprovementKeys(): Promise<ImpKeys> {
-  if (!IMPROVEMENTS_DB_ID) throw new Error('Missing NOTION_IMPROVEMENTS_DB_ID')
-  if (impCache.has(IMPROVEMENTS_DB_ID)) return impCache.get(IMPROVEMENTS_DB_ID)!
-  const db = await notion.databases.retrieve({ database_id: IMPROVEMENTS_DB_ID })
-  const props = (db as any).properties as Record<string, any>
-  const keys: Partial<ImpKeys> = {}
-
-  for (const [logical, cands] of Object.entries(IMP_ALIASES) as Array<[keyof typeof IMP_ALIASES, ReadonlyArray<string>]>) {
-    const found = cands.find(k => props[k])
-    if (found) (keys as any)[logical] = found
-  }
-  if (keys.status) (keys as any).statusKind = (props[keys.status] as any)?.type as any
-
-  if (!keys.title) {
-    const auto = Object.entries(props).find(([, v]: any) => v?.type === 'title')?.[0]
-    if (auto) keys.title = auto
-  }
-  if (!keys.title) throw new Error('Improvements DB: no title property')
-  impCache.set(IMPROVEMENTS_DB_ID, keys as ImpKeys)
-  return keys as ImpKeys
-}
-
-export type ImprovementItem = {
-  id: string
-  title: string
-  status?: string
-  projectId?: string
-  action?: string
-  url?: string
-}
-
-export async function listImprovements(params?: { projectId?: string; openOnly?: boolean }) {
-  const keys = await getImprovementKeys()
-  const and: any[] = []
-  if (params?.projectId && keys.project) and.push({ property: keys.project, relation: { contains: params.projectId } })
-  const filter = and.length ? { and } : undefined
-
-  const results = await getAll<any>((cursor) =>
-    notion.databases.query({
-      database_id: IMPROVEMENTS_DB_ID,
-      ...(filter && { filter }),
+  // --- Linked DB helpers
+  async function viaRelation(dbId: string, mapRow: (props: any, id: string) => any) {
+    const relProp = await relationToProjectsProp(dbId);
+    if (!relProp) return [];
+    const rows = await queryAll(dbId, {
+      filter: { property: relProp, relation: { contains: projectId } },
       page_size: 100,
-      ...(cursor && { start_cursor: cursor }),
-    }) as any
-  )
-
-  let items: ImprovementItem[] = results
-    .filter(p => p.object === 'page')
-    .map((page: any) => {
-      const p = page.properties
-      return {
-        id: page.id,
-        title: p[keys.title!]?.title?.[0]?.plain_text ?? 'Untitled',
-        status: keys.status
-          ? (keys.statusKind === 'status'
-              ? p[keys.status]?.status?.name
-              : p[keys.status]?.select?.name)
-          : undefined,
-        projectId: keys.project ? p[keys.project]?.relation?.[0]?.id : undefined,
-        action: keys.action ? getPlain(p[keys.action]?.rich_text) : undefined,
-        url: page.url,
-      }
-    })
-
-  if (params?.openOnly && keys.status) {
-    items = items.filter(i => !/done|resolved|closed|complete/i.test(i.status || ''))
+    });
+    return rows.map((r: any) => mapRow(r.properties, r.id));
   }
-  return items
+
+  // Tasks
+  const tasksMeta = await getDbMeta(DB.tasks);
+  const taskTitle = pickProp(tasksMeta.props, ['Task', 'Title', 'Name']) ?? Object.keys(tasksMeta.props).find(k => tasksMeta.props[k].type === 'title');
+  const taskStatus = pickProp(tasksMeta.props, ['Status']);
+  const taskAssignee = pickProp(tasksMeta.props, ['Asignee', 'Assignee', 'Person']);
+  const taskDue = pickProp(tasksMeta.props, ['Due Date', 'Due']);
+
+  const tasks = await viaRelation(DB.tasks, (props, id) => ({
+    id,
+    title: taskTitle ? textOf(props[taskTitle]) : 'Untitled',
+    status: taskStatus ? selectName(props[taskStatus]) : undefined,
+    assignee: taskAssignee ? textOf(props[taskAssignee]) : undefined,
+    due: taskDue ? dateStr(props[taskDue]) : undefined,
+  }));
+
+  // Improvements / Upgrades
+  const impMeta = await getDbMeta(DB.improvements);
+  const impTitle = pickProp(impMeta.props, ['Improvement', 'Title', 'Name']) ?? Object.keys(impMeta.props).find(k => impMeta.props[k].type === 'title');
+  const impStatus = pickProp(impMeta.props, ['Status']);
+  const impAction = pickProp(impMeta.props, ['Action']);
+
+  const improvements = await viaRelation(DB.improvements, (props, id) => ({
+    id,
+    title: impTitle ? textOf(props[impTitle]) : 'Untitled',
+    status: impStatus ? selectName(props[impStatus]) : undefined,
+    action: impAction ? textOf(props[impAction]) : undefined,
+  }));
+
+  // Expenses
+  const expMeta = await getDbMeta(DB.expenses);
+  const expName = pickProp(expMeta.props, ['Name', 'Title']) ?? Object.keys(expMeta.props).find(k => expMeta.props[k].type === 'title');
+  const expCat = pickProp(expMeta.props, ['Category']);
+  const expVal = pickProp(expMeta.props, ['Value']);
+
+  const expenses = await viaRelation(DB.expenses, (props, id) => ({
+    id,
+    name: expName ? textOf(props[expName]) : 'Untitled',
+    category: expCat ? selectName(props[expCat]) ?? textOf(props[expCat]) : undefined,
+    value: expVal ? numberVal(props[expVal]) ?? 0 : 0,
+  }));
+
+  // Time
+  const timeMeta = await getDbMeta(DB.time);
+  const tName = pickProp(timeMeta.props, ['Name', 'Title']) ?? Object.keys(timeMeta.props).find(k => timeMeta.props[k].type === 'title');
+  const tPerson = pickProp(timeMeta.props, ['Person']);
+  const tDate = pickProp(timeMeta.props, ['Date', 'Created time']);
+  const tHours = pickProp(timeMeta.props, ['Hours']);
+
+  const time = await viaRelation(DB.time, (props, id) => ({
+    id,
+    name: tName ? textOf(props[tName]) : 'Entry',
+    person: tPerson ? textOf(props[tPerson]) : undefined,
+    date: tDate ? dateStr(props[tDate]) : undefined,
+    hours: tHours ? numberVal(props[tHours]) ?? 0 : 0,
+  }));
+
+  // Notes
+  const notesMeta = await getDbMeta(DB.notes);
+  const nTitle = pickProp(notesMeta.props, ['Name', 'Title']) ?? Object.keys(notesMeta.props).find(k => notesMeta.props[k].type === 'title');
+  const nCreated = pickProp(notesMeta.props, ['Created Date', 'Created time', 'Last edited time']);
+
+  const notes = await viaRelation(DB.notes, (props, id) => ({
+    id,
+    title: nTitle ? textOf(props[nTitle]) : 'Note',
+    created: nCreated ? dateStr(props[nCreated]) : undefined,
+  }));
+
+  // Docs
+  const docsMeta = await getDbMeta(DB.docs);
+  const dTitle = pickProp(docsMeta.props, ['Title', 'Name']) ?? Object.keys(docsMeta.props).find(k => docsMeta.props[k].type === 'title');
+  const dDesc = pickProp(docsMeta.props, ['Description']);
+
+  const docs = await viaRelation(DB.docs, (props, id) => ({
+    id,
+    title: dTitle ? textOf(props[dTitle]) : 'Doc',
+    description: dDesc ? textOf(props[dDesc]) : undefined,
+  }));
+
+  // quick totals
+  const totals = {
+    totalExpenses: expenses.reduce((a, b) => a + (b.value ?? 0), 0),
+    totalHours: time.reduce((a, b) => a + (b.hours ?? 0), 0),
+    openTasks: tasks.filter(t => (t.status ?? '').toLowerCase() !== 'done' && (t.status ?? '').toLowerCase() !== 'completed').length,
+    openImprovements: improvements.filter(i => (i.status ?? '').toLowerCase() !== 'done' && (i.status ?? '').toLowerCase() !== 'completed').length,
+  };
+
+  return { project: { ...project, ...totals }, tasks, improvements, expenses, time, notes, docs };
 }
 
-export async function createImprovement(input: { projectId: string; title: string; action?: string }) {
-  const keys = await getImprovementKeys()
-  const props: any = { [keys.title]: { title: [{ text: { content: input.title } }] } }
-  if (keys.project) props[keys.project] = { relation: [{ id: input.projectId }] }
-  if (keys.action && input.action) props[keys.action] = { rich_text: [{ text: { content: input.action } }] }
-  if (keys.status) props[keys.status] = keys.statusKind === 'status' ? { status: { name: 'Open' } } : { select: { name: 'Open' } }
-  const page = await notion.pages.create({ parent: { database_id: IMPROVEMENTS_DB_ID }, properties: props })
-  return page.id
-}
-
-export async function updateImprovementStatus(pageId: string, newStatus: string) {
-  const keys = await getImprovementKeys()
-  if (!keys.status) throw new Error('Improvements DB has no Status')
-  const payload = keys.statusKind === 'status' ? { status: { name: newStatus } } : { select: { name: newStatus } }
-  await notion.pages.update({ page_id: pageId, properties: { [keys.status]: payload } })
-}
-
-// ---------- Related DBs (Tasks, Expenses, Time, Notes, Docs) ----------
-type GenericKeys = { title: string; project?: string } & Record<string, any>
-
-function pickTitleKey(props: Record<string, any>) {
-  return Object.entries(props).find(([, v]: any) => v?.type === 'title')?.[0]
-}
-
-async function makeKeysForDB(dbId: string, alias: Record<string, readonly string[]>) {
-  const db = await notion.databases.retrieve({ database_id: dbId })
-  const props = (db as any).properties as Record<string, any>
-  const keys: any = {}
-  for (const [logical, cands] of Object.entries(alias) as Array<[string, readonly string[]]>) {
-    const found = cands.find(k => props[k])
-    if (found) keys[logical] = found
-  }
-  if (!keys.title) keys.title = pickTitleKey(props)
-  return keys as GenericKeys
-}
-
-export type TaskItem = { id: string; title: string; status?: string; due?: string|null; assignee?: string; notes?: string }
-export async function listTasks(projectId: string): Promise<TaskItem[]> {
-  if (!TASKS_DB_ID) return []
-  const ALIASES = {
-    title: ['Task', 'Name', 'Title'] as const,
-    status: ['Status'] as const,
-    due: ['Due Date', 'Deadline', 'Date'] as const,
-    assignee: ['Asignee', 'Assignee', 'Person'] as const,
-    notes: ['Notes', 'Comment', 'Description'] as const,
-    project: ['Projects', 'Project'] as const,
-  }
-  const keys = await makeKeysForDB(TASKS_DB_ID, ALIASES)
-  const filter: any = keys.project ? { property: keys.project, relation: { contains: projectId } } : undefined
-
-  const items = await getAll<any>((cursor) =>
-    notion.databases.query({ database_id: TASKS_DB_ID, ...(filter && { filter }), page_size: 100, ...(cursor && { start_cursor: cursor }) }) as any
-  )
-
-  return items.map((page: any) => {
-    const p = page.properties
-    return {
-      id: page.id,
-      title: p[keys.title]?.title?.[0]?.plain_text ?? 'Untitled',
-      status: p[keys.status]?.status?.name ?? p[keys.status]?.select?.name,
-      due: keys.due ? (p[keys.due]?.date?.start ?? null) : null,
-      assignee: keys.assignee ? (p[keys.assignee]?.people?.[0]?.name ?? p[keys.assignee]?.rich_text?.[0]?.plain_text) : undefined,
-      notes: keys.notes ? getPlain(p[keys.notes]?.rich_text) : undefined,
-    }
-  })
-}
-
-export type ExpenseItem = { id: string; name: string; category?: string; value?: number|null }
-export async function listExpenses(projectId: string): Promise<ExpenseItem[]> {
-  if (!EXPENSES_DB_ID) return []
-  const ALIASES = {
-    title: ['Name', 'Title'] as const,
-    category: ['Category'] as const,
-    value: ['Value', 'Amount', 'Cost'] as const,
-    project: ['Projects', 'Project'] as const,
-  }
-  const keys = await makeKeysForDB(EXPENSES_DB_ID, ALIASES)
-  const filter: any = keys.project ? { property: keys.project, relation: { contains: projectId } } : undefined
-
-  const items = await getAll<any>((cursor) =>
-    notion.databases.query({ database_id: EXPENSES_DB_ID, ...(filter && { filter }), page_size: 100, ...(cursor && { start_cursor: cursor }) }) as any
-  )
-  return items.map((page: any) => {
-    const p = page.properties
-    return {
-      id: page.id,
-      name: p[keys.title]?.title?.[0]?.plain_text ?? 'Untitled',
-      category: keys.category ? (p[keys.category]?.select?.name ?? p[keys.category]?.status?.name) : undefined,
-      value: keys.value ? (p[keys.value]?.number ?? null) : null,
-    }
-  })
-}
-
-export type TimeEntry = { id: string; date?: string|null; hours?: number|null; person?: string; name: string }
-export async function listTimeEntries(projectId: string): Promise<TimeEntry[]> {
-  if (!TIME_DB_ID) return []
-  const ALIASES = {
-    title: ['Name', 'Title'] as const,
-    date: ['Date'] as const,
-    hours: ['Hours'] as const,
-    person: ['Person'] as const,
-    project: ['Projects', 'Project'] as const,
-  }
-  const keys = await makeKeysForDB(TIME_DB_ID, ALIASES)
-  const filter: any = keys.project ? { property: keys.project, relation: { contains: projectId } } : undefined
-
-  const items = await getAll<any>((cursor) =>
-    notion.databases.query({ database_id: TIME_DB_ID, ...(filter && { filter }), page_size: 100, ...(cursor && { start_cursor: cursor }) }) as any
-  )
-  return items.map((page: any) => {
-    const p = page.properties
-    return {
-      id: page.id,
-      name: p[keys.title]?.title?.[0]?.plain_text ?? 'Untitled',
-      date: keys.date ? (p[keys.date]?.date?.start ?? null) : null,
-      hours: keys.hours ? (p[keys.hours]?.number ?? null) : null,
-      person: keys.person ? (p[keys.person]?.people?.[0]?.name ?? p[keys.person]?.rich_text?.[0]?.plain_text) : undefined,
-    }
-  })
-}
-
-export type NoteItem = { id: string; title: string; created?: string|null }
-export async function listNotes(projectId: string): Promise<NoteItem[]> {
-  if (!NOTES_DB_ID) return []
-  const ALIASES = {
-    title: ['Name', 'Title'] as const,
-    created: ['Created Date', 'Date'] as const,
-    project: ['Projects', 'Project'] as const,
-  }
-  const keys = await makeKeysForDB(NOTES_DB_ID, ALIASES)
-  const filter: any = keys.project ? { property: keys.project, relation: { contains: projectId } } : undefined
-
-  const items = await getAll<any>((cursor) =>
-    notion.databases.query({ database_id: NOTES_DB_ID, ...(filter && { filter }), page_size: 100, ...(cursor && { start_cursor: cursor }) }) as any
-  )
-  return items.map((page: any) => {
-    const p = page.properties
-    return { id: page.id, title: p[keys.title]?.title?.[0]?.plain_text ?? 'Untitled', created: keys.created ? (p[keys.created]?.date?.start ?? null) : null }
-  })
-}
-
-export type DocItem = { id: string; title: string; description?: string }
-export async function listDocs(projectId: string): Promise<DocItem[]> {
-  if (!DOCS_DB_ID) return []
-  const ALIASES = {
-    title: ['Title', 'Name'] as const,
-    desc: ['Description', 'Notes'] as const,
-    project: ['Project', 'Projects'] as const,
-  }
-  const keys = await makeKeysForDB(DOCS_DB_ID, ALIASES)
-  const filter: any = keys.project ? { property: keys.project, relation: { contains: projectId } } : undefined
-
-  const items = await getAll<any>((cursor) =>
-    notion.databases.query({ database_id: DOCS_DB_ID, ...(filter && { filter }), page_size: 100, ...(cursor && { start_cursor: cursor }) }) as any
-  )
-  return items.map((page: any) => {
-    const p = page.properties
-    return { id: page.id, title: p[keys.title]?.title?.[0]?.plain_text ?? 'Untitled', description: keys.desc ? getPlain(p[keys.desc]?.rich_text) : undefined }
-  })
-}
-
-// Aggregate full job view
-export type ProjectFull = {
-  project: ProjectItem
-  improvements: ImprovementItem[]
-  tasks: TaskItem[]
-  expenses: ExpenseItem[]
-  time: TimeEntry[]
-  notes: NoteItem[]
-  docs: DocItem[]
-}
-
-export async function getProjectFull(projectId: string): Promise<ProjectFull> {
-  const [project, improvements, tasks, expenses, time, notes, docs] = await Promise.all([
-    getProjectById(projectId),
-    listImprovements({ projectId }),
-    listTasks(projectId),
-    listExpenses(projectId),
-    listTimeEntries(projectId),
-    listNotes(projectId),
-    listDocs(projectId),
-  ])
-  return { project, improvements, tasks, expenses, time, notes, docs }
-}
