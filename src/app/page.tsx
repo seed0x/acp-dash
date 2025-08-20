@@ -1,12 +1,13 @@
-// src/app/page.tsx
-import ProjectsBoard from '@/components/ProjectsBoard'
+import OperationsDashboard from '@/components/OperationsDashboard'
 
 export default function Page() {
   return (
     <main className="max-w-7xl mx-auto p-6 space-y-4">
-      <h1 className="text-2xl font-bold">ACP — Projects</h1>
-      <p className="text-sm text-[var(--muted)]">Project status by column • Search • Budget vs Spent</p>
-      <ProjectsBoard />
+      <h1 className="text-2xl font-bold">ACP — Operations</h1>
+      <p className="text-sm text-[var(--muted)]">
+        Post &amp; Beam total • Job Account checklist • Upgrades per lot • Active bids & follow-ups • Active problems
+      </p>
+      <OperationsDashboard />
     </main>
   )
 }
