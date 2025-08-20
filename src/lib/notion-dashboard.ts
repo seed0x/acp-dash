@@ -151,16 +151,19 @@ export async function listProjectOptions() {
 export async function countPostAndBeam() {
   const keys = await getProjectKeys()
   if (!keys.status) return 0
+  const statusProp: string = keys.status // narrow to string for the closure
+
   const results = await getAll<any>((cursor) =>
     notion.databases.query({
       database_id: PROJECTS_DB_ID,
-      filter: { property: keys.status, select: { equals: 'Post & Beam' } },
+      filter: { property: statusProp, select: { equals: 'Post & Beam' } },
       page_size: 100,
       ...(cursor && { start_cursor: cursor }),
     }) as any
   )
   return results.length
 }
+
 
 export async function listBids() {
   const { items } = await listProjects()
@@ -280,4 +283,5 @@ export async function updateImprovementStatus(pageId: string, newStatus: string)
   if (!keys.status) throw new Error('Improvements DB has no Status')
   await notion.pages.update({ page_id: pageId, properties: { [keys.status]: { select: { name: newStatus } } } })
 }
+
 
