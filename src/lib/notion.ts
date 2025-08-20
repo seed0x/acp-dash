@@ -3,7 +3,7 @@ import { Client } from '@notionhq/client'
 
 export const notion = new Client({ auth: process.env.NOTION_TOKEN })
 
-export const DB_IDS = (process.env.NOTION_DB_IDS || '')
+export const DB_IDS = (process.env.NOTION_DB_IDS ?? '')
   .split(',')
   .map(s => s.trim())
   .filter(Boolean)
@@ -28,20 +28,20 @@ export type Item = {
 
 // ---------- Flexible property resolution ----------
 const ALIASES = {
-  title:     ['Name', 'Title'],
-  stage:     ['Stage', 'Status', 'Pipeline', 'State'],
-  type:      ['Type', 'Item Type', 'Record Type'],
-  customer:  ['Customer', 'Client', 'Account', 'Company', 'Contact'],
-  address:   ['Address', 'Job Address', 'Location'],
-  amount:    ['Amount', 'Value', 'Total', 'Price'],
-  due:       ['Due', 'Due Date', 'Target Date', 'Date'],
-  bidNo:     ['Bid #', 'Bid Number'],
-  invoiceNo: ['Invoice #', 'Invoice Number'],
-} as const
+  title:     ['Name', 'Title'] as const,
+  stage:     ['Stage', 'Status', 'Pipeline', 'State'] as const,
+  type:      ['Type', 'Item Type', 'Record Type'] as const,
+  customer:  ['Customer', 'Client', 'Account', 'Company', 'Contact'] as const,
+  address:   ['Address', 'Job Address', 'Location'] as const,
+  amount:    ['Amount', 'Value', 'Total', 'Price'] as const,
+  due:       ['Due', 'Due Date', 'Target Date', 'Date'] as const,
+  bidNo:     ['Bid #', 'Bid Number'] as const,
+  invoiceNo: ['Invoice #', 'Invoice Number'] as const,
+}
 
 type PropKeys = Partial<Record<keyof typeof ALIASES, string>> & { title: string }
 
-function pickProp(props: Record<string, any>, candidates: string[]) {
+function pickProp(props: Record<string, any>, candidates: ReadonlyArray<string>) {
   for (const k of candidates) if (props[k]) return k
 }
 
@@ -51,24 +51,26 @@ async function getPropKeys(dbId: string): Promise<PropKeys> {
   if (schemaCache.has(dbId)) return schemaCache.get(dbId)!
   const db = await notion.databases.retrieve({ database_id: dbId })
   const props = (db as any).properties as Record<string, any>
-  const keys: any = {}
-  for (const [logical, cands] of Object.entries(ALIASES)) {
-    const key = pickProp(props, cands as string[])
-    if (key) keys[logical] = key
+
+  const keys: Partial<PropKeys> = {}
+  for (const [logical, cands] of Object.entries(ALIASES) as Array<[keyof typeof ALIASES, ReadonlyArray<string>]>) {
+    const key = pickProp(props, cands)
+    if (key) (keys as any)[logical] = key
   }
+
   if (!keys.title) throw new Error(`No title property found on DB ${dbId}`)
   schemaCache.set(dbId, keys as PropKeys)
   return keys as PropKeys
 }
 
 // ---------- Mapping ----------
-const getPlain = (rt: any) => rt?.[0]?.plain_text
+const getPlain = (rt: any) => (Array.isArray(rt) ? rt[0]?.plain_text : undefined)
 
-export function mapPageToItem(dbId: string, page: any, keys: PropKeys): Item {
+function mapPageToItem(dbId: string, page: any, keys: PropKeys): Item {
   const p = page.properties
   const title = p[keys.title!]?.title?.[0]?.plain_text ?? 'Untitled'
-  const stage = keys.stage ? p[keys.stage]?.select?.name as Stage : undefined
-  const type  = keys.type  ? p[keys.type ]?.select?.name as ItemType : undefined
+  const stage = keys.stage ? (p[keys.stage]?.select?.name as Stage | undefined) : undefined
+  const type  = keys.type  ? (p[keys.type ]?.select?.name as ItemType | undefined) : undefined
   const customer = keys.customer ? getPlain(p[keys.customer]?.rich_text) : undefined
   const address  = keys.address  ? getPlain(p[keys.address ]?.rich_text) : undefined
   const amount   = keys.amount   ? (p[keys.amount]?.number ?? null) : null
@@ -100,7 +102,7 @@ export async function listItems(params: { query?: string; type?: ItemType | 'All
   for (const dbId of DB_IDS) {
     const keys = await getPropKeys(dbId)
 
-    // Build filters using *resolved* property names
+    // Build filters using resolved property names
     const and: any[] = []
 
     if (type && type !== 'All' && keys.type) {
@@ -127,15 +129,21 @@ export async function listItems(params: { query?: string; type?: ItemType | 'All
     const filter = and.length ? { and } : undefined
     const sorts = keys.due ? [{ property: keys.due, direction: 'ascending' as const }] : undefined
 
-    const pages = await notion.databases.query({ database_id: dbId, ...(filter && { filter }), ...(sorts && { sorts }) })
+    const pages = await notion.databases.query({
+      database_id: dbId,
+      ...(filter && { filter }),
+      ...(sorts && { sorts })
+    })
+
     for (const page of pages.results) {
       if (page.object === 'page') results.push(mapPageToItem(dbId, page, keys))
     }
   }
+
   return results
 }
 
-// ---------- Updates (uses page -> parent DB to find the right property name) ----------
+// ---------- Updates ----------
 export async function updateStage(pageId: string, newStage: Stage) {
   const page = await notion.pages.retrieve({ page_id: pageId })
   const parent = (page as any).parent
@@ -148,3 +156,4 @@ export async function updateStage(pageId: string, newStage: Stage) {
     properties: { [keys.stage]: { select: { name: newStage } } },
   })
 }
+
