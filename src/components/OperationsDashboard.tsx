@@ -4,14 +4,35 @@ import { useEffect, useMemo, useState } from 'react'
 
 type KPI = { postAndBeam: number; activeBids: number; jobAccountsPending: number; openProblems: number }
 type ProjectRow = { id: string; title: string; client?: string; location?: string; status?: string; url?: string }
-type ImprovementRow = { id: string; title: string; status?: string; url?: string }
+type ImprovementRow = { id: string; title: string; status?: string; url?: string; projectId?: string }
 type BidRow = ProjectRow
+
+type ProjectFull = {
+  project: {
+    id: string
+    title: string
+    status?: string
+    client?: string
+    location?: string
+    deadline?: string | null
+    jobAccount?: boolean | null
+    followUp?: boolean | null
+    budget?: number | null
+    spent?: number | null
+  }
+  improvements: Array<{ id: string; title: string; status?: string }>
+  tasks: Array<{ id: string; title: string; status?: string; due?: string|null; assignee?: string }>
+  expenses: Array<{ id: string; name: string; category?: string; value?: number|null }>
+  time: Array<{ id: string; name: string; date?: string|null; hours?: number|null; person?: string }>
+  notes: Array<{ id: string; title: string; created?: string|null }>
+  docs: Array<{ id: string; title: string; description?: string }>
+}
 
 async function fetchJSON<T>(url: string): Promise<T> {
   const res = await fetch(url, { cache: 'no-store' })
   const text = await res.text()
   let data: any = null
-  try { data = text ? JSON.parse(text) : null } catch { /* not JSON */ }
+  try { data = text ? JSON.parse(text) : null } catch {}
   if (!res.ok) {
     const msg = (data && (data.error || data.message)) || `${res.status} ${res.statusText}`
     throw new Error(`${url} → ${msg}`)
@@ -27,6 +48,11 @@ export default function OperationsDashboard() {
   const [projects, setProjects] = useState<Array<{ id: string; title: string }>>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  // details modal
+  const [openId, setOpenId] = useState<string | null>(null)
+  const [detail, setDetail] = useState<ProjectFull | null>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
 
   // quick add upgrade form
   const [projectId, setProjectId] = useState('')
@@ -46,13 +72,9 @@ export default function OperationsDashboard() {
       ])
       setKpis(k); setPendingAcct(p); setBids(b); setProblems(pr); setProjects(opts)
       if (!projectId && opts[0]) setProjectId(opts[0].id)
-    } catch (e: any) {
-      setError(e?.message || String(e))
-    } finally {
-      setLoading(false)
-    }
+    } catch (e: any) { setError(e?.message || String(e)) }
+    finally { setLoading(false) }
   }
-
   useEffect(() => { load() }, [])
 
   const bidsGrouped = useMemo(() => {
@@ -76,9 +98,17 @@ export default function OperationsDashboard() {
       })
       setUpgradeTitle(''); setUpgradeNotes('')
       await load()
-    } catch (e: any) {
-      setError(e?.message || String(e))
-    }
+    } catch (e: any) { setError(e?.message || String(e)) }
+  }
+
+  const openProject = async (id: string | undefined | null) => {
+    if (!id) return
+    setOpenId(id); setDetail(null); setDetailLoading(true); setError(null)
+    try {
+      const data = await fetchJSON<ProjectFull>(`/api/projects/${id}/full`)
+      setDetail(data)
+    } catch (e: any) { setError(e?.message || String(e)) }
+    finally { setDetailLoading(false) }
   }
 
   return (
@@ -114,7 +144,8 @@ export default function OperationsDashboard() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                {row.url && <a className="text-xs underline" href={row.url} target="_blank" rel="noreferrer">Open</a>}
+                <button className="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600 text-sm"
+                  onClick={() => openProject(row.id)}>View</button>
                 <button className="px-3 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-sm"
                   onClick={async () => {
                     try {
@@ -158,7 +189,10 @@ export default function OperationsDashboard() {
               <div className="font-semibold mb-2">{col} <span className="text-xs text-[var(--muted)]">({rows.length})</span></div>
               <div className="grid gap-2">
                 {rows.map(r => (
-                  <Card key={r.id} title={r.title} subtitle={[r.client, r.location].filter(Boolean).join(' • ')} href={r.url} />
+                  <Card key={r.id} title={r.title} subtitle={[r.client, r.location].filter(Boolean).join(' • ')}>
+                    <button className="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600 text-sm"
+                      onClick={() => openProject(r.id)}>View</button>
+                  </Card>
                 ))}
               </div>
             </div>
@@ -177,7 +211,8 @@ export default function OperationsDashboard() {
                 <div className="text-xs text-[var(--muted)] truncate">{p.status || 'Open'}</div>
               </div>
               <div className="flex items-center gap-2">
-                {p.url && <a className="text-xs underline" href={p.url} target="_blank" rel="noreferrer">Open</a>}
+                <button className="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600 text-sm"
+                  onClick={() => openProject(p.projectId)}>View Job</button>
                 <button className="px-3 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-sm"
                   onClick={async () => {
                     try {
@@ -198,6 +233,11 @@ export default function OperationsDashboard() {
       </Section>
 
       {loading && <div className="text-xs text-[var(--muted)]">Loading…</div>}
+
+      {/* Details modal */}
+      {openId && (
+        <DetailsModal onClose={() => setOpenId(null)} loading={detailLoading} data={detail} />
+      )}
     </div>
   )
 }
@@ -231,16 +271,114 @@ function Row({ children }: { children: any }) {
   )
 }
 
-function Card({ title, subtitle, href }: { title: string; subtitle?: string; href?: string }) {
+function Card({ title, subtitle, children }: { title: string; subtitle?: string; children?: any }) {
   return (
     <div className="rounded-lg p-3 bg-black/20 border border-white/10">
       <div className="font-medium truncate">{title}</div>
       {subtitle && <div className="text-xs text-[var(--muted)] truncate">{subtitle}</div>}
-      {href && <a className="text-xs underline mt-2 inline-block" href={href} target="_blank" rel="noreferrer">Open in Notion</a>}
+      {children && <div className="mt-2">{children}</div>}
     </div>
   )
 }
 
 function Empty({ text }: { text: string }) {
   return <div className="text-sm text-[var(--muted)]">{text}</div>
+}
+
+/* ---------- Modal ---------- */
+function DetailsModal({ onClose, loading, data }: { onClose: () => void; loading: boolean; data: ProjectFull | null }) {
+  const [tab, setTab] = useState<'Overview'|'Upgrades'|'Tasks'|'Expenses'|'Time'|'Notes'|'Docs'>('Overview')
+  return (
+    <div className="fixed inset-0 bg-black/70 z-50 flex">
+      <div className="m-auto w-[min(1100px,95vw)] max-h-[90vh] rounded-xl overflow-hidden bg-[#0c1220] border border-white/10">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+          <div className="font-semibold">{data?.project.title || 'Job Details'}</div>
+          <button onClick={onClose} className="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600 text-sm">Close</button>
+        </div>
+
+        <div className="px-4 pt-2">
+          <div className="flex flex-wrap gap-2 text-sm">
+            {(['Overview','Upgrades','Tasks','Expenses','Time','Notes','Docs'] as const).map(t => (
+              <button key={t}
+                className={`px-3 py-1 rounded ${tab===t?'bg-slate-600':'bg-slate-800 hover:bg-slate-700'}`}
+                onClick={() => setTab(t)}>{t}</button>
+            ))}
+          </div>
+        </div>
+
+        <div className="p-4 overflow-auto max-h-[75vh]">
+          {loading && <div className="text-sm text-[var(--muted)]">Loading…</div>}
+          {!loading && data && (
+            <>
+              {tab === 'Overview' && (
+                <div className="grid md:grid-cols-2 gap-4">
+                  <Info title="Status" value={data.project.status || '-'} />
+                  <Info title="Client" value={data.project.client || '-'} />
+                  <Info title="Location" value={data.project.location || '-'} />
+                  <Info title="Deadline" value={data.project.deadline || '-'} />
+                  <Info title="Job Account Created" value={data.project.jobAccount ? 'Yes' : 'No'} />
+                  <Info title="Follow-up Needed" value={data.project.followUp ? 'Yes' : 'No'} />
+                  <Info title="Budget" value={fmtMoney(data.project.budget)} />
+                  <Info title="Spent" value={fmtMoney(data.project.spent)} />
+                </div>
+              )}
+
+              {tab === 'Upgrades' && <List items={data.improvements} cols={['title','status']} headers={['Title','Status']} empty="No upgrades/problems." />}
+
+              {tab === 'Tasks' && <List items={data.tasks} cols={['title','status','assignee','due']} headers={['Task','Status','Assignee','Due']} empty="No tasks." />}
+
+              {tab === 'Expenses' && (
+                <List items={data.expenses.map(e => ({...e, title: e.name, value: fmtMoney(e.value)}))}
+                      cols={['title','category','value']} headers={['Expense','Category','Value']} empty="No expenses." />
+              )}
+
+              {tab === 'Time' && <List items={data.time} cols={['name','person','date','hours']} headers={['Entry','Person','Date','Hours']} empty="No time entries." />}
+
+              {tab === 'Notes' && <List items={data.notes} cols={['title','created']} headers={['Note','Created']} empty="No notes." />}
+
+              {tab === 'Docs' && <List items={data.docs} cols={['title','description']} headers={['Document','Description']} empty="No docs." />}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function Info({ title, value }: { title: string; value: any }) {
+  return (
+    <div className="rounded-lg bg-black/20 border border-white/10 p-3">
+      <div className="text-xs text-[var(--muted)]">{title}</div>
+      <div className="font-medium">{value ?? '-'}</div>
+    </div>
+  )
+}
+
+function List({ items, cols, headers, empty }:{
+  items: any[]; cols: string[]; headers: string[]; empty: string
+}) {
+  if (!items.length) return <div className="text-sm text-[var(--muted)]">{empty}</div>
+  return (
+    <div className="overflow-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-left text-[var(--muted)]">
+            {headers.map(h => <th key={h} className="py-2 pr-4">{h}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((it) => (
+            <tr key={it.id} className="border-t border-white/10">
+              {cols.map(c => <td key={c} className="py-2 pr-4">{it[c] ?? '-'}</td>)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function fmtMoney(n?: number|null) {
+  if (n == null) return '-'
+  try { return Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' }).format(n) } catch { return String(n) }
 }
