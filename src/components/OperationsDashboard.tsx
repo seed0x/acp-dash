@@ -2,24 +2,25 @@
 
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { Plus, UploadCloud, Camera, CheckCircle2, Search, Briefcase } from 'lucide-react';
+import { Plus, Camera, CheckCircle2, Search, Briefcase } from 'lucide-react';
 import ProjectDetailPanel from './ProjectDetailPanel';
 
-// Type definitions remain mostly the same
+// Type definitions
 type KPI = { postAndBeam: number; activeBids: number; jobAccountsPending: number; openProblems: number };
 type ProjectRow = { id: string; title: string; client?: string; location?: string; status?: string; builder?: string; };
-type ImprovementRow = { id: string; title: string; status?: string; projectId?: string };
 type BoardItem = { id: string; title: string; status?: string; client?: string; location?: string; builder?: string; };
 type ProjectOption = { id:string; title: string };
 
 async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, { cache: 'no-store', ...init });
-  if (!res.ok) throw new Error((await res.json()).error || 'Fetch error');
+  if (!res.ok) {
+    const errorBody = await res.json().catch(() => ({ error: 'Fetch error with no JSON body' }));
+    throw new Error(errorBody.error || 'Fetch error');
+  }
   return res.json() as T;
 }
 
-// Main Dashboard Component
-function DashboardComponent({ initialKpis, initialPendingAcct, initialProblems }: { initialKpis: KPI, initialPendingAcct: ProjectRow[], initialProblems: ImprovementRow[] }) {
+function DashboardComponent({ initialKpis, initialPendingAcct }: { initialKpis: KPI, initialPendingAcct: ProjectRow[] }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const viewingProjectId = searchParams.get('viewing');
@@ -36,20 +37,18 @@ function DashboardComponent({ initialKpis, initialPendingAcct, initialProblems }
   const [boardLoading, setBoardLoading] = useState(true);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
 
-  // Consolidated state for quick actions
+  // State for actions
   const [actionProjectId, setActionProjectId] = useState('');
   const [upgradeTitle, setUpgradeTitle] = useState('');
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoDescription, setPhotoDescription] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Debounce search input
   useEffect(() => {
     const t = setTimeout(() => setQuery(searchInput.trim()), 400);
     return () => clearTimeout(t);
   }, [searchInput]);
 
-  // Data loading logic
   const loadData = async () => {
     try {
       const [summary, acct, projectsList] = await Promise.all([
@@ -60,7 +59,7 @@ function DashboardComponent({ initialKpis, initialPendingAcct, initialProblems }
       setKpis(summary.kpis);
       setPendingAcct(acct.rows);
       setProjects(projectsList.rows);
-      if (projectsList.rows.length > 0) {
+      if (projectsList.rows.length > 0 && !actionProjectId) {
         setActionProjectId(projectsList.rows[0].id);
       }
     } catch (e: any) { setError(e.message) }
@@ -86,25 +85,31 @@ function DashboardComponent({ initialKpis, initialPendingAcct, initialProblems }
     return acc;
   }, {} as Record<string, BoardItem[]>), [boardItems]);
 
-  const handleActionSubmit = async (type: 'upgrade' | 'photo') => {
-    if (!actionProjectId) return;
+  const handlePhotoSubmit = async () => {
+    if (!actionProjectId || !photoFile) return;
     setIsSubmitting(true);
     setError(null);
     try {
-      if (type === 'upgrade' && upgradeTitle) {
-        await fetch('/api/improvements', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId: actionProjectId, title: upgradeTitle }) });
-        setUpgradeTitle('');
-      } else if (type === 'photo' && photoFile) {
-        const formData = new FormData();
-        formData.append('file', photoFile);
-        formData.append('projectId', actionProjectId);
-        formData.append('description', photoDescription);
-        await fetch('/api/photos', { method: 'POST', body: formData });
-        setPhotoFile(null);
-        setPhotoDescription('');
-      }
-      await loadData(); // Refresh KPIs and lists
+      const formData = new FormData();
+      formData.append('file', photoFile);
+      formData.append('projectId', actionProjectId);
+      formData.append('description', photoDescription);
+      await fetch('/api/photos', { method: 'POST', body: formData });
+      setPhotoFile(null);
+      setPhotoDescription('');
     } catch (e: any) { setError(e.message) }
+    finally { setIsSubmitting(false) }
+  };
+  
+  const handleUpgradeSubmit = async () => {
+    if (!actionProjectId || !upgradeTitle) return;
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      await fetch('/api/improvements', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId: actionProjectId, title: upgradeTitle }) });
+      setUpgradeTitle('');
+      await loadData();
+    } catch (e:any) { setError(e.message) }
     finally { setIsSubmitting(false) }
   };
 
@@ -114,63 +119,61 @@ function DashboardComponent({ initialKpis, initialPendingAcct, initialProblems }
   return (
     <>
       {viewingProjectId && <ProjectDetailPanel projectId={viewingProjectId} onClose={handleClosePanel} />}
-      <div className="space-y-8 p-4 md:p-6">
-        {error && <div className="card p-3 bg-destructive text-destructive-foreground">{error}</div>}
+      <div className="p-4 md:p-6">
+        {error && <div className="card p-3 bg-destructive text-destructive-foreground mb-4">{error}</div>}
         
-        {/* KPIs */}
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <KpiCard icon={Briefcase} title="Post & Beam" value={kpis.postAndBeam} />
-          <KpiCard icon={Briefcase} title="Active Bids" value={kpis.activeBids} />
-          <KpiCard icon={Briefcase} title="Job Accounts Pending" value={kpis.jobAccountsPending} />
-          <KpiCard icon={Briefcase} title="Open Problems" value={kpis.openProblems} />
-        </div>
-        
-        <div className="grid gap-6 lg:grid-cols-3">
-          {/* Main Content: Project Board */}
-          <div className="lg:col-span-2 space-y-4">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Left Column: Projects */}
+          <div className="lg:col-span-2 flex flex-col gap-4">
             <div className="flex flex-col md:flex-row gap-2">
               <div className="relative flex-grow">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
-                <input value={searchInput} onChange={e => setSearchInput(e.target.value)} placeholder="Search jobs by name, client, or address…" className="input pl-10 w-full" />
+                <input value={searchInput} onChange={e => setSearchInput(e.target.value)} placeholder="Search jobs..." className="input pl-10 w-full" />
               </div>
               <select value={status} onChange={e => setStatus(e.target.value)} className="input md:w-60">{statusOptions.map(opt => <option key={opt}>{opt}</option>)}</select>
             </div>
-            {boardLoading ? <div className="card h-96 skeleton" /> :
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                {Object.entries(grouped).map(([col, rows]) => (
-                  <div key={col} className="space-y-3">
-                    <h3 className="font-semibold px-1">{col} <span className="text-sm text-muted-foreground">({rows.length})</span></h3>
-                    <div className="space-y-3">
-                      {rows.map(r => <ProjectCard key={r.id} project={r} onClick={() => handleViewProject(r.id)} />)}
+            <div className="flex-grow h-[calc(100vh-12rem)] overflow-y-auto pr-2">
+              {boardLoading ? <div className="card h-full w-full skeleton" /> :
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  {Object.entries(grouped).map(([col, rows]) => (
+                    <div key={col} className="space-y-3">
+                      <h3 className="font-semibold px-1">{col} <span className="text-sm text-muted-foreground">({rows.length})</span></h3>
+                      <div className="space-y-3">
+                        {rows.map(r => <ProjectCard key={r.id} project={r} onClick={() => handleViewProject(r.id)} />)}
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
-            }
+                  ))}
+                </div>
+              }
+            </div>
           </div>
           
-          {/* Side Content: Actions & Checklists */}
+          {/* Right Column: Actions */}
           <div className="space-y-6">
-            <ActionCard title="Quick Actions" icon={Plus}>
-              <div className="space-y-4">
+            <ActionCard title="Add Photo" icon={Camera}>
+              <div className="space-y-3">
                 <select value={actionProjectId} onChange={e => setActionProjectId(e.target.value)} className="input w-full">
                   {projects.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
                 </select>
-                <div className="space-y-2">
-                  <input value={upgradeTitle} onChange={e => setUpgradeTitle(e.target.value)} placeholder="Add an upgrade..." className="input"/>
-                  <button onClick={() => handleActionSubmit('upgrade')} disabled={isSubmitting || !upgradeTitle} className="w-full btn btn-secondary">Add Upgrade</button>
-                </div>
-                <div className="space-y-2">
-                  <input type="file" accept="image/*" onChange={e => setPhotoFile(e.target.files?.[0] || null)} className="input"/>
-                  <input value={photoDescription} onChange={e => setPhotoDescription(e.target.value)} placeholder="Photo description..." className="input"/>
-                  <button onClick={() => handleActionSubmit('photo')} disabled={isSubmitting || !photoFile} className="w-full btn btn-secondary">Upload Photo</button>
-                </div>
+                <input type="file" accept="image/*" onChange={e => setPhotoFile(e.target.files?.[0] || null)} className="input"/>
+                <input value={photoDescription} onChange={e => setPhotoDescription(e.target.value)} placeholder="Photo description..." className="input"/>
+                <button onClick={handlePhotoSubmit} disabled={isSubmitting || !photoFile} className="w-full btn btn-primary">Upload Photo</button>
+              </div>
+            </ActionCard>
+
+            <ActionCard title="Add Upgrade" icon={Plus}>
+              <div className="space-y-3">
+                <select value={actionProjectId} onChange={e => setActionProjectId(e.target.value)} className="input w-full">
+                    {projects.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
+                </select>
+                <input value={upgradeTitle} onChange={e => setUpgradeTitle(e.target.value)} placeholder="Upgrade description..." className="input"/>
+                <button onClick={handleUpgradeSubmit} disabled={isSubmitting || !upgradeTitle} className="w-full btn btn-secondary">Add Upgrade</button>
               </div>
             </ActionCard>
 
             <ActionCard title="Job Account Checklist" icon={CheckCircle2}>
-              <div className="space-y-2 max-h-80 overflow-y-auto">
-                {pendingAcct.map(row => (
+              <div className="space-y-2 max-h-60 overflow-y-auto">
+                {pendingAcct.length > 0 ? pendingAcct.map(row => (
                   <div key={row.id} className="flex items-center justify-between p-2 rounded-md bg-secondary/50">
                     <div onClick={() => handleViewProject(row.id)} className="cursor-pointer min-w-0">
                       <p className="font-medium truncate">{row.title}</p>
@@ -178,7 +181,7 @@ function DashboardComponent({ initialKpis, initialPendingAcct, initialProblems }
                     </div>
                     <button className="btn btn-primary ml-2 px-2 h-8" onClick={async () => { try { await fetch('/api/projects/job-account', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: row.id, value: true }) }); await loadData(); } catch(e:any) { setError(e.message) }}}>Done</button>
                   </div>
-                ))}
+                )) : <p className="text-sm text-muted-foreground">All accounts are set up!</p>}
               </div>
             </ActionCard>
           </div>
@@ -187,19 +190,6 @@ function DashboardComponent({ initialKpis, initialPendingAcct, initialProblems }
     </>
   );
 }
-
-// Sub-components for better organization
-const KpiCard = ({ icon: Icon, title, value }: { icon: React.ElementType, title: string, value: number | string }) => (
-  <div className="card p-4 flex items-start justify-between">
-    <div>
-      <p className="text-sm font-medium text-muted-foreground">{title}</p>
-      <p className="text-2xl font-bold">{value}</p>
-    </div>
-    <div className="p-2 bg-secondary rounded-lg">
-      <Icon className="h-5 w-5 text-muted-foreground" />
-    </div>
-  </div>
-);
 
 const ActionCard = ({ icon: Icon, title, children }: { icon: React.ElementType, title: string, children: React.ReactNode }) => (
   <div className="card">
@@ -222,8 +212,7 @@ const ProjectCard = ({ project, onClick }: { project: BoardItem, onClick: () => 
   </div>
 );
 
-// Suspense boundary for client components that use searchParams
-export default function OperationsDashboard(props: { initialKpis: KPI, initialPendingAcct: ProjectRow[], initialProblems: ImprovementRow[] }) {
+export default function OperationsDashboard(props: { initialKpis: KPI, initialPendingAcct: ProjectRow[] }) {
   return (
     <Suspense fallback={<div className="p-6"><div className="w-full h-96 card skeleton" /></div>}>
       <DashboardComponent {...props} />

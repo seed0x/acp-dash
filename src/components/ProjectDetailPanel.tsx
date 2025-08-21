@@ -1,9 +1,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { X, Building, User, MapPin, DollarSign, Clock, CheckSquare, Wrench } from 'lucide-react';
+import { X, Building, User, MapPin, DollarSign, Clock, CheckSquare, Wrench, Camera } from 'lucide-react';
 
-// Type definitions... (same as before)
+// Type definitions
 type Photo = { id: string; description: string; url: string; };
 type ProjectFull = {
   project: { id: string; title: string; client?: string; location?: string; builder?: string; status?: string; budget?: number; spent?: number; totalExpenses?: number; totalHours?: number; openTasks?: number; openImprovements?: number; };
@@ -19,13 +19,13 @@ function fmtMoney(n?: number | null) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n);
 }
 
-const TABS = ['Details', 'Photos', 'Expenses', 'Tasks', 'Improvements', 'Time'];
+const TABS = ['Photos', 'Details', 'Expenses', 'Tasks', 'Improvements', 'Time'];
 
 export default function ProjectDetailPanel({ projectId, onClose }: { projectId: string; onClose: () => void }) {
   const [data, setData] = useState<ProjectFull | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState(TABS[0]);
+  const [activeTab, setActiveTab] = useState(TABS[0]); // Default to Photos
 
   useEffect(() => {
     async function fetchData() {
@@ -77,8 +77,8 @@ export default function ProjectDetailPanel({ projectId, onClose }: { projectId: 
           {error && <div className="text-destructive">{error}</div>}
           {data && (
             <div>
-              {activeTab === 'Details' && project && <DetailsTab project={project} />}
               {activeTab === 'Photos' && <PhotosTab items={photos!} />}
+              {activeTab === 'Details' && project && <DetailsTab project={project} />}
               {activeTab === 'Expenses' && <TabContent items={expenses!} titleKey="name" valueKey="value" formatValue={fmtMoney} />}
               {activeTab === 'Tasks' && <TabContent items={tasks!} titleKey="title" metaKeys={['status', 'assignee', 'due']} />}
               {activeTab === 'Improvements' && <TabContent items={improvements!} titleKey="title" metaKeys={['status']} />}
@@ -128,13 +128,13 @@ const DetailsTab = ({ project }: { project: ProjectFull['project'] }) => (
 );
 
 const PhotosTab = ({ items }: { items: Photo[] }) => (
-  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
     {items.length > 0 ? items.map(it => (
       <div key={it.id} className="card overflow-hidden group">
         <a href={it.url} target="_blank" rel="noopener noreferrer" className="block relative">
-          <img src={it.url} alt={it.description} className="w-full h-40 object-cover bg-secondary group-hover:scale-105 transition-transform duration-300" />
+          <img src={it.url} alt={it.description} className="w-full h-48 object-cover bg-secondary group-hover:scale-105 transition-transform duration-300" />
           <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"/>
-          <p className="absolute bottom-0 left-0 p-2 text-xs text-foreground">{it.description}</p>
+          <p className="absolute bottom-0 left-0 p-2 text-sm text-foreground">{it.description}</p>
         </a>
       </div>
     )) : <p className="text-sm text-muted-foreground col-span-full">No photos for this project yet.</p>}

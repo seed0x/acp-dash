@@ -8,34 +8,17 @@ export const notion = new Client({
   auth: process.env.NOTION_TOKEN || process.env.NOTION_API_KEY,
 })
 
-const env = (k: string) => process.env[k]
+const env = (k: string) => process.env[k] || ''
 
-export const PROJECTS_DB_ID =
-  env('NEXT_PUBLIC_NOTION_PROJECTS_DB_ID') || env('NOTION_PROJECTS_DB_ID') || env('PROJECTS_DB_ID') || ''
+export const PROJECTS_DB_ID = env('PROJECTS_DB_ID')
+export const CLIENTS_DB_ID = env('CLIENTS_DB_ID')
+export const TIME_DB_ID = env('TIME_DB_ID') // This is now used for Photos as well
+export const IMPROVEMENTS_DB_ID = env('IMPROVEMENTS_DB_ID')
+export const TASKS_DB_ID = env('TASKS_DB_ID')
+export const EXPENSES_DB_ID = env('EXPENSES_DB_ID')
+export const NOTES_DB_ID = env('NOTES_DB_ID')
+export const DOCS_DB_ID = env('DOCS_DB_ID')
 
-export const CLIENTS_DB_ID = 
-  env('NEXT_PUBLIC_NOTION_CLIENTS_DB_ID') || env('NOTION_CLIENTS_DB_ID') || env('CLIENTS_DB_ID') || ''
-
-export const PHOTOS_DB_ID =
-  env('NEXT_PUBLIC_NOTION_PHOTOS_DB_ID') || env('NOTION_PHOTOS_DB_ID') || env('PHOTOS_DB_ID') || ''
-
-export const IMPROVEMENTS_DB_ID =
-  env('NEXT_PUBLIC_NOTION_IMPROVEMENTS_DB_ID') || env('NOTION_IMPROVEMENTS_DB_ID') || env('IMPROVEMENTS_DB_ID') || ''
-
-export const TASKS_DB_ID =
-  env('NEXT_PUBLIC_NOTION_TASKS_DB_ID') || env('NOTION_TASKS_DB_ID') || env('TASKS_DB_ID') || ''
-
-export const EXPENSES_DB_ID =
-  env('NEXT_PUBLIC_NOTION_EXPENSES_DB_ID') || env('NOTION_EXPENSES_DB_ID') || env('EXPENSES_DB_ID') || ''
-
-export const TIME_DB_ID =
-  env('NEXT_PUBLIC_NOTION_TIME_DB_ID') || env('NOTION_TIME_DB_ID') || env('TIME_DB_ID') || ''
-
-export const NOTES_DB_ID =
-  env('NEXT_PUBLIC_NOTION_NOTES_DB_ID') || env('NOTION_NOTES_DB_ID') || env('NOTES_DB_ID') || ''
-
-export const DOCS_DB_ID =
-  env('NEXT_PUBLIC_NOTION_DOCS_DB_ID') || env('NOTION_DOCS_DB_ID') || env('DOCS_DB_ID') || ''
 
 /** -------------------------------
  * Flexible schema (Projects)
@@ -390,7 +373,7 @@ export async function listProjectOptions(): Promise<Array<{ id: string; title: s
 
 /** 9) Board data + status options + search */
 export async function listProjectsBoard(input: { q?: string; status?: string }): Promise<{
-  items: Array<{ id: string; title: string; status?: string; client?: string; location?: string }>
+  items: Array<{ id: string; title: string; status?: string; client?: string; location?: string; builder?: string; }>
   statusOptions: string[]
 }> {
   if (!PROJECTS_DB_ID) return { items: [], statusOptions: [] }
@@ -437,6 +420,7 @@ export async function listProjectsBoard(input: { q?: string; status?: string }):
       status: readTextish(p, keys.status),
       client,
       location: readTextish(p, keys.location),
+      builder: readTextish(p, keys.builder),
     }
   }))
 
@@ -444,7 +428,8 @@ export async function listProjectsBoard(input: { q?: string; status?: string }):
     ? items.filter(item => 
         item.title.toLowerCase().includes(q.toLowerCase()) || 
         item.location?.toLowerCase().includes(q.toLowerCase()) ||
-        item.client?.toLowerCase().includes(q.toLowerCase())
+        item.client?.toLowerCase().includes(q.toLowerCase()) ||
+        item.builder?.toLowerCase().includes(q.toLowerCase())
       )
     : items;
 
@@ -498,13 +483,20 @@ export async function getProjectFull(id: string): Promise<{
     return await queryAll({ database_id: dbId, filter: { property: relKey, relation: { contains: id } } as any })
   }
 
-  const [impRows, taskRows, expRows, timeRows, photoRows] = await Promise.all([
+  // Fetch all related items
+  const [impRows, taskRows, expRows, timeAndPhotoRows] = await Promise.all([
     listRelated(IMPROVEMENTS_DB_ID),
     listRelated(TASKS_DB_ID),
     listRelated(EXPENSES_DB_ID),
-    listRelated(TIME_DB_ID),
-    listRelated(PHOTOS_DB_ID, 'Project'),
+    listRelated(TIME_DB_ID, 'Project'),
   ]);
+
+  // Separate Photos from Time entries from the same database
+  const timeDbProps = TIME_DB_ID ? await notion.databases.retrieve({ database_id: TIME_DB_ID }).then(db => db.properties) : {};
+  const filesKey = Object.keys(timeDbProps).find(k => timeDbProps[k].type === 'files');
+  
+  const photoRows = filesKey ? timeAndPhotoRows.filter(r => r.properties[filesKey]?.files?.length > 0) : [];
+  const timeRows = filesKey ? timeAndPhotoRows.filter(r => !r.properties[filesKey]?.files?.length) : timeAndPhotoRows;
   
   const mapRelated = (rows: any[], typeMap: Record<string, string>) => rows.map((r) => {
     const p = r.properties || {};
@@ -538,16 +530,27 @@ export async function getProjectFull(id: string): Promise<{
 
 /** 11) Create Photo Entry */
 export async function createPhotoEntry(input: { projectId: string; description: string; photoUrl: string }) {
-  if (!PHOTOS_DB_ID) throw new Error('PHOTOS_DB_ID missing');
+  if (!TIME_DB_ID) throw new Error('TIME_DB_ID (for photos) is not configured in your environment variables.');
+
+  const db: any = await notion.databases.retrieve({ database_id: TIME_DB_ID });
+  const props = db.properties || {};
+
+  const titleKey = Object.keys(props).find(k => props[k].type === 'title');
+  const filesKey = Object.keys(props).find(k => props[k].type === 'files');
+  const relationKey = Object.keys(props).find(k => props[k].type === 'relation' && props[k].relation?.database_id === PROJECTS_DB_ID);
+
+  if (!titleKey || !filesKey || !relationKey) {
+    throw new Error('Your "Time" database must have a Title, a Files & Media, and a Relation to Projects property to be used for photos.');
+  }
 
   const properties: any = {
-    'Name': { title: [{ text: { content: input.description } }] },
-    'Photo': { files: [{ name: input.description, external: { url: input.photoUrl } }] },
-    'Project': { relation: [{ id: input.projectId }] },
+    [titleKey]: { title: [{ text: { content: input.description || 'Untitled Photo' } }] },
+    [filesKey]: { files: [{ name: input.description || input.photoUrl, external: { url: input.photoUrl } }] },
+    [relationKey]: { relation: [{ id: input.projectId }] },
   };
 
   await notion.pages.create({
-    parent: { database_id: PHOTOS_DB_ID },
+    parent: { database_id: TIME_DB_ID },
     properties,
   } as any);
 }
