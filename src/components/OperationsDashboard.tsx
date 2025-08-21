@@ -119,6 +119,7 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: {
   const [searchInput, setSearchInput] = useState('');
   const [query, setQuery] = useState('');
   const [selectedPhase, setSelectedPhase] = useState<string>('all');
+  const [statusOptions, setStatusOptions] = useState<string[]>(['All']);
   const [boardItems, setBoardItems] = useState<BoardItem[]>([]);
   const [boardLoading, setBoardLoading] = useState(true);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
