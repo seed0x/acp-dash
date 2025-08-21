@@ -15,9 +15,9 @@ export default async function Page() {
     listBids(),
     listJobAccountPending(),
     listImprovements(true),
-  ]).catch(err => {
+  ] as const).catch(err => { // The "as const" here fixes the type inference issue
     console.error("Failed to fetch initial data:", err);
-    return [0, [], [], []]; // Return default values on error
+    return [0, [], [], []] as const; // Also added here for type consistency in case of an error
   });
 
   const initialKpis = {
