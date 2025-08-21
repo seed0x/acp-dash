@@ -1,7 +1,6 @@
-'use client'
+'use client';
 
-import { useState } from "react";
-import type { KPI, ProjectRow, OpsProps } from "@/types/ops";
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import { 
   Plus, Camera, CheckCircle2, Search, User, Building, MapPin, 
   DollarSign, Clock, TrendingUp, AlertCircle, CheckSquare,
@@ -20,7 +19,11 @@ type KPI = {
   openProblems: number; 
 };
 
-type ProjectRow = { id: string; title: string; client?: string; location?: string; status?: string }
+type ProjectRow = { 
+  id: string; 
+  title: string; 
+  client?: string; 
+};
 
 type BoardItem = { 
   id: string; 
@@ -112,6 +115,15 @@ const PIPELINE_PHASES = [
   }
 ];
 
+async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, { cache: 'no-store', ...init });
+  if (!res.ok) {
+    const errorBody = await res.json().catch(() => ({ error: 'Fetch error with no JSON body' }));
+    throw new Error(errorBody.error || 'Fetch error');
+  }
+  return res.json() as T;
+}
+
 function getProjectPhase(status?: string) {
   if (!status) return 'other';
   const statusLower = status.toLowerCase();
@@ -123,67 +135,21 @@ function getProjectPhase(status?: string) {
   return 'other';
 }
 
-// Mock functions for demo
-async function fetchJSON<T>(url: string): Promise<T> {
-  // Simulated API responses
-  await new Promise(resolve => setTimeout(resolve, 500));
-  
-  if (url.includes('/api/dashboard/summary')) {
-    return { kpis: { postAndBeam: 12, activeBids: 5, jobAccountsPending: 3, openProblems: 8 } } as T;
-  }
-  
-  if (url.includes('/api/projects/job-account')) {
-    return { rows: [
-      { id: '1', title: 'Apple Ln', client: 'John Smith' },
-      { id: '2', title: '123 Main St', client: 'Jane Doe' }
-    ] } as T;
-  }
-  
-  if (url.includes('/api/projects/list')) {
-    return { rows: [
-      { id: '1', title: 'Apple Ln' },
-      { id: '2', title: '123 Main St' },
-      { id: '3', title: 'Oak Grove' },
-      { id: '4', title: 'Pine Ridge' }
-    ] } as T;
-  }
-  
-  if (url.includes('/api/improvements')) {
-    return { rows: [
-      { id: '1', title: 'Bathroom leak needs repair', status: 'Open', projectName: 'Apple Ln' },
-      { id: '2', title: 'Kitchen sink installation delayed', status: 'In Progress', projectName: '123 Main St' },
-      { id: '3', title: 'Missing shut-off valve', status: 'Open', projectName: 'Oak Grove' }
-    ] } as T;
-  }
-  
-  if (url.includes('/api/projects/board')) {
-    return { 
-      items: [
-        { id: '1', title: 'Apple Ln', status: 'Bidding', client: 'John Smith', location: '123 Apple Ln, Portland', builder: 'ABC Construction' },
-        { id: '2', title: 'Dollars Corner & Gas Store', status: 'Bidding', client: 'Gas Station LLC', location: 'Dollars Corner', builder: 'XYZ Builders' },
-        { id: '3', title: 'Untitled', status: 'Bidding', client: undefined, location: undefined, builder: undefined },
-        { id: '4', title: 'Upcoming', status: 'Bidding', client: 'Future Client', location: 'TBD', builder: 'TBD' },
-        { id: '5', title: '123 Main St', status: 'Post & Beam', client: 'Jane Doe', location: '123 Main St', builder: 'Main Builders' },
-        { id: '6', title: 'Oak Grove', status: 'Trim', client: 'Oak Family', location: 'Oak Grove Rd', builder: 'Grove Construction' },
-        { id: '7', title: 'Pine Ridge', status: 'Complete', client: 'Pine LLC', location: 'Pine Ridge Dr', builder: 'Ridge Builders' }
-      ],
-      statusOptions: ['Bidding', 'Post & Beam', 'Top Out', 'Trim', 'Complete']
-    } as T;
-  }
-  
-  return {} as T;
-}
-
-export default function OperationsDashboard({ initialKpis, initialPendingAcct }: OpsProps) {
+function DashboardComponent({ initialKpis, initialPendingAcct }: { 
+  initialKpis: KPI, 
+  initialPendingAcct: ProjectRow[] 
+}) {
   const [viewingProjectId, setViewingProjectId] = useState<string | null>(null);
-  const [kpis, setKpis] = useState<KPI>({ postAndBeam: 0, activeBids: 0, jobAccountsPending: 0, openProblems: 0 });
-  const [pendingAcct, setPendingAcct] = useState<ProjectRow[]>([]);
+  const [kpis, setKpis] = useState(initialKpis);
+  const [pendingAcct, setPendingAcct] = useState(initialPendingAcct);
   const [issues, setIssues] = useState<Issue[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   
   const [searchInput, setSearchInput] = useState('');
+  const [query, setQuery] = useState('');
   const [selectedPhase, setSelectedPhase] = useState<string>('all');
+  const [statusOptions, setStatusOptions] = useState<string[]>(['All']);
   const [boardItems, setBoardItems] = useState<BoardItem[]>([]);
   const [boardLoading, setBoardLoading] = useState(true);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
@@ -204,9 +170,16 @@ export default function OperationsDashboard({ initialKpis, initialPendingAcct }:
   const [showIssuesPanel, setShowIssuesPanel] = useState(false);
 
   useEffect(() => {
-    loadData();
-    loadBoard();
-  }, []);
+    const t = setTimeout(() => setQuery(searchInput.trim()), 400);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
+  useEffect(() => {
+    if (successMessage) {
+      const timer = setTimeout(() => setSuccessMessage(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [successMessage]);
 
   const loadData = async () => {
     try {
@@ -229,11 +202,16 @@ export default function OperationsDashboard({ initialKpis, initialPendingAcct }:
     }
   };
 
-  const loadBoard = async () => {
+  const loadBoard = useMemo(() => async () => {
     setBoardLoading(true);
     try {
-      const data = await fetchJSON<{ items: BoardItem[]; statusOptions: string[] }>('/api/projects/board');
+      setError(null);
+      const qs = new URLSearchParams({ q: query, status: 'All' });
+      const data = await fetchJSON<{ items: BoardItem[]; statusOptions: string[] }>(`/api/projects/board?${qs}`);
       setBoardItems(data.items || []);
+      if (data.statusOptions && data.statusOptions.length > 0) {
+        setStatusOptions(prev => prev.length > 1 ? prev : ['All', ...data.statusOptions]);
+      }
       
       // Initialize bidding statuses
       const statuses: Record<string, string> = {};
@@ -243,10 +221,34 @@ export default function OperationsDashboard({ initialKpis, initialPendingAcct }:
       setBiddingStatuses(statuses);
     } catch (e: any) {
       setError(`Failed to load projects: ${e.message}`);
+      setBoardItems([]);
     } finally {
       setBoardLoading(false);
     }
-  };
+  }, [query]);
+
+  useEffect(() => { loadData(); }, []);
+  useEffect(() => { loadBoard(); }, [loadBoard]);
+
+  // Filter projects based on search and phase
+  const filteredItems = useMemo(() => {
+    let items = boardItems;
+    
+    if (selectedPhase !== 'all') {
+      items = items.filter(item => getProjectPhase(item.status) === selectedPhase);
+    }
+    
+    return items;
+  }, [boardItems, selectedPhase]);
+
+  // Group projects by phase
+  const groupedProjects = useMemo(() => {
+    const groups = PIPELINE_PHASES.reduce((acc, phase) => {
+      acc[phase.key] = filteredItems.filter(item => getProjectPhase(item.status) === phase.key);
+      return acc;
+    }, {} as Record<string, BoardItem[]>);
+    return groups;
+  }, [filteredItems]);
 
   const handleQuickAction = async (type: 'photo' | 'upgrade') => {
     if (!actionProjectId) {
@@ -254,23 +256,60 @@ export default function OperationsDashboard({ initialKpis, initialPendingAcct }:
       return;
     }
     
+    if (type === 'photo' && !photoFile) {
+      setError('Please select a photo file');
+      return;
+    }
+    
+    if (type === 'upgrade' && !upgradeTitle.trim()) {
+      setError('Please enter an issue description');
+      return;
+    }
+
     setIsSubmitting(true);
     setError(null);
     
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
       if (type === 'photo' && photoFile) {
+        const formData = new FormData();
+        formData.append('file', photoFile);
+        formData.append('projectId', actionProjectId);
+        formData.append('description', photoDescription.trim() || photoFile.name);
+        
+        const response = await fetch('/api/photos', { method: 'POST', body: formData });
+        const result = await response.json();
+        
+        if (!response.ok) {
+          throw new Error(result.error || 'Failed to upload photo');
+        }
+        
         setPhotoFile(null);
         setPhotoDescription('');
+        const fileInput = document.getElementById('photo-file-input') as HTMLInputElement;
+        if (fileInput) fileInput.value = '';
+        
         const projectName = projects.find(p => p.id === actionProjectId)?.title;
         setSuccessMessage(`Photo uploaded to ${projectName} with today's date`);
+        
       } else if (type === 'upgrade' && upgradeTitle.trim()) {
+        const response = await fetch('/api/improvements', { 
+          method: 'POST', 
+          headers: { 'Content-Type': 'application/json' }, 
+          body: JSON.stringify({ 
+            projectId: actionProjectId, 
+            title: upgradeTitle.trim()
+          }) 
+        });
+        const result = await response.json();
+        
+        if (!response.ok) {
+          throw new Error(result.error || 'Failed to add issue');
+        }
+        
         setUpgradeTitle('');
         const projectName = projects.find(p => p.id === actionProjectId)?.title;
         setSuccessMessage(`Issue added to ${projectName}`);
-        await loadData(); // Reload issues
+        await loadData();
       }
     } catch (e: any) {
       setError(e.message || 'An unexpected error occurred');
@@ -290,8 +329,16 @@ export default function OperationsDashboard({ initialKpis, initialPendingAcct }:
 
   const handleIssueComplete = async (issueId: string) => {
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 500));
+      const response = await fetch('/api/improvements', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: issueId, status: 'Done' })
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to complete issue');
+      }
+      
       setIssues(prev => prev.filter(i => i.id !== issueId));
       setSuccessMessage('Issue marked as complete');
       await loadData();
@@ -300,37 +347,25 @@ export default function OperationsDashboard({ initialKpis, initialPendingAcct }:
     }
   };
 
-  // Filter projects based on search
-  const filteredItems = useMemo(() => {
-    let items = boardItems;
-    
-    if (searchInput.trim()) {
-      const query = searchInput.toLowerCase();
-      items = items.filter(item =>
-        [item.title, item.client, item.location, item.builder].some(v => 
-          (v || '').toLowerCase().includes(query)
-        )
-      );
-    }
-    
-    if (selectedPhase !== 'all') {
-      items = items.filter(item => getProjectPhase(item.status) === selectedPhase);
-    }
-    
-    return items;
-  }, [boardItems, searchInput, selectedPhase]);
+  const handleViewProject = (id: string) => setViewingProjectId(id);
+  const handleClosePanel = () => setViewingProjectId(null);
 
-  // Group projects by phase
-  const groupedProjects = useMemo(() => {
-    const groups = PIPELINE_PHASES.reduce((acc, phase) => {
-      acc[phase.key] = filteredItems.filter(item => getProjectPhase(item.status) === phase.key);
-      return acc;
-    }, {} as Record<string, BoardItem[]>);
-    return groups;
-  }, [filteredItems]);
+  const totalProjects = boardItems.length;
+  const phaseStats = PIPELINE_PHASES.map(phase => ({
+    ...phase,
+    count: groupedProjects[phase.key]?.length || 0
+  }));
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
+      {/* Project Detail Panel */}
+      {viewingProjectId && (
+        <ProjectDetailPanel 
+          projectId={viewingProjectId} 
+          onClose={handleClosePanel} 
+        />
+      )}
+
       {/* Header KPIs */}
       <div className="border-b border-slate-800 bg-slate-900/50 backdrop-blur-xl">
         <div className="max-w-7xl mx-auto px-4 py-6">
@@ -370,10 +405,9 @@ export default function OperationsDashboard({ initialKpis, initialPendingAcct }:
         </div>
       </div>
 
-      {/* Mobile Quick Actions - At Top */}
+      {/* Mobile Quick Actions */}
       <div className="lg:hidden bg-gradient-to-r from-slate-900 to-slate-800 border-b border-slate-700">
         <div className="p-4 space-y-4">
-          {/* Photo Upload */}
           <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
             <div className="flex items-center gap-2 mb-3">
               <Camera className="h-5 w-5 text-blue-400" />
@@ -391,6 +425,7 @@ export default function OperationsDashboard({ initialKpis, initialPendingAcct }:
                 ))}
               </select>
               <input 
+                id="photo-file-input-mobile"
                 type="file" 
                 accept="image/*" 
                 capture="environment"
@@ -408,7 +443,6 @@ export default function OperationsDashboard({ initialKpis, initialPendingAcct }:
             </div>
           </div>
           
-          {/* Add Issue */}
           <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
             <div className="flex items-center gap-2 mb-3">
               <AlertTriangle className="h-5 w-5 text-orange-400" />
@@ -438,16 +472,22 @@ export default function OperationsDashboard({ initialKpis, initialPendingAcct }:
         <div className="max-w-7xl mx-auto px-4 pt-4">
           {error && (
             <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-lg flex items-center justify-between">
-              <span>{error}</span>
-              <button onClick={() => setError(null)}>
+              <div className="flex items-center gap-3">
+                <AlertCircle className="h-5 w-5" />
+                <span>{error}</span>
+              </div>
+              <button onClick={() => setError(null)} className="text-red-400 hover:text-red-300">
                 <X className="h-4 w-4" />
               </button>
             </div>
           )}
           {successMessage && (
             <div className="bg-green-500/10 border border-green-500/20 text-green-400 p-4 rounded-lg flex items-center justify-between">
-              <span>{successMessage}</span>
-              <button onClick={() => setSuccessMessage(null)}>
+              <div className="flex items-center gap-3">
+                <CheckCircle2 className="h-5 w-5" />
+                <span>{successMessage}</span>
+              </div>
+              <button onClick={() => setSuccessMessage(null)} className="text-green-400 hover:text-green-300">
                 <X className="h-4 w-4" />
               </button>
             </div>
@@ -493,27 +533,24 @@ export default function OperationsDashboard({ initialKpis, initialPendingAcct }:
                   : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
               }`}
             >
-              All Projects ({boardItems.length})
+              All Projects ({totalProjects})
             </button>
-            {PIPELINE_PHASES.map(phase => {
-              const count = groupedProjects[phase.key]?.length || 0;
-              return (
-                <button
-                  key={phase.key}
-                  onClick={() => setSelectedPhase(phase.key)}
-                  className={`px-5 py-3 rounded-xl font-medium transition-all flex items-center gap-2 ${
-                    selectedPhase === phase.key
-                      ? `bg-gradient-to-r ${phase.color} text-white shadow-lg`
-                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                  }`}
-                >
-                  <phase.icon className="h-4 w-4" />
-                  <span className="hidden sm:inline">{phase.label}</span>
-                  <span className="sm:hidden">{phase.label.split(' ')[0]}</span>
-                  ({count})
-                </button>
-              );
-            })}
+            {phaseStats.map(phase => (
+              <button
+                key={phase.key}
+                onClick={() => setSelectedPhase(phase.key)}
+                className={`px-5 py-3 rounded-xl font-medium transition-all flex items-center gap-2 ${
+                  selectedPhase === phase.key
+                    ? `bg-gradient-to-r ${phase.color} text-white shadow-lg`
+                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                }`}
+              >
+                <phase.icon className="h-4 w-4" />
+                <span className="hidden sm:inline">{phase.label}</span>
+                <span className="sm:hidden">{phase.label.split(' ')[0]}</span>
+                ({phase.count})
+              </button>
+            ))}
           </div>
         </div>
 
@@ -532,7 +569,7 @@ export default function OperationsDashboard({ initialKpis, initialPendingAcct }:
                 <Building className="h-16 w-16 text-slate-400 mx-auto mb-4" />
                 <h3 className="text-xl font-semibold text-white mb-2">No Projects Found</h3>
                 <p className="text-slate-400">
-                  {searchInput ? `No results for "${searchInput}"` : 'No projects yet'}
+                  {query ? `No results for "${query}"` : 'No projects yet'}
                 </p>
               </div>
             ) : (
@@ -543,39 +580,16 @@ export default function OperationsDashboard({ initialKpis, initialPendingAcct }:
                     if (!projects || projects.length === 0) return null;
                     
                     return (
-                      <div key={phase.key} className={`${phase.bgColor} border ${phase.borderColor} rounded-2xl overflow-hidden`}>
-                        <div className={`p-6 bg-gradient-to-r ${phase.color} bg-opacity-10`}>
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <div className="p-3 bg-white/10 rounded-xl">
-                                <phase.icon className={`h-6 w-6 ${phase.iconColor}`} />
-                              </div>
-                              <div>
-                                <h2 className="text-xl font-semibold text-white">
-                                  {phase.label}
-                                </h2>
-                                <p className="text-sm text-slate-300">{phase.description}</p>
-                              </div>
-                            </div>
-                            <span className="text-2xl font-bold text-white">{projects.length}</span>
-                          </div>
-                        </div>
-                        <div className="p-6">
-                          <div className="grid gap-4">
-                            {projects.map(project => (
-                              <ProjectCard
-                                key={project.id}
-                                project={project}
-                                phase={phase}
-                                biddingStatus={biddingStatuses[project.id]}
-                                onBiddingStatusUpdate={handleBiddingStatusUpdate}
-                                editingBidStatus={editingBidStatus}
-                                setEditingBidStatus={setEditingBidStatus}
-                              />
-                            ))}
-                          </div>
-                        </div>
-                      </div>
+                      <PhaseContainer
+                        key={phase.key}
+                        phase={phase}
+                        projects={projects}
+                        onProjectClick={handleViewProject}
+                        biddingStatuses={biddingStatuses}
+                        onBiddingStatusUpdate={handleBiddingStatusUpdate}
+                        editingBidStatus={editingBidStatus}
+                        setEditingBidStatus={setEditingBidStatus}
+                      />
                     );
                   })
                 ) : (
@@ -590,6 +604,7 @@ export default function OperationsDashboard({ initialKpis, initialPendingAcct }:
                               project={project}
                               phase={phase}
                               biddingStatus={biddingStatuses[project.id]}
+                              onProjectClick={() => handleViewProject(project.id)}
                               onBiddingStatusUpdate={handleBiddingStatusUpdate}
                               editingBidStatus={editingBidStatus}
                               setEditingBidStatus={setEditingBidStatus}
@@ -685,7 +700,25 @@ export default function OperationsDashboard({ initialKpis, initialPendingAcct }:
                       <div key={acct.id} className="bg-slate-800/50 border border-slate-700 rounded-lg p-3">
                         <p className="font-medium text-white text-sm">{acct.title}</p>
                         <p className="text-xs text-slate-400 mb-2">{acct.client || 'No client'}</p>
-                        <button className="w-full bg-orange-600 hover:bg-orange-700 text-white py-1.5 rounded text-sm font-medium">
+                        <button 
+                          className="w-full bg-orange-600 hover:bg-orange-700 text-white py-1.5 rounded text-sm font-medium"
+                          onClick={async () => {
+                            try {
+                              const response = await fetch('/api/projects/job-account', {
+                                method: 'PATCH',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ id: acct.id, value: true })
+                              });
+                              if (!response.ok) {
+                                throw new Error('Failed to update job account');
+                              }
+                              await loadData();
+                              setSuccessMessage('Job account marked as complete');
+                            } catch(e: any) {
+                              setError(e.message);
+                            }
+                          }}
+                        >
                           Setup Account
                         </button>
                       </div>
@@ -717,6 +750,7 @@ export default function OperationsDashboard({ initialKpis, initialPendingAcct }:
                 ))}
               </select>
               <input 
+                id="photo-file-input"
                 type="file" 
                 accept="image/*" 
                 onChange={e => setPhotoFile(e.target.files?.[0] || null)}
@@ -780,11 +814,58 @@ const KPICard = ({ icon: Icon, label, value, trend, color, subtitle, onClick }: 
   </div>
 );
 
+// Phase Container Component
+const PhaseContainer = ({ phase, projects, onProjectClick, biddingStatuses, onBiddingStatusUpdate, editingBidStatus, setEditingBidStatus }: {
+  phase: typeof PIPELINE_PHASES[0];
+  projects: BoardItem[];
+  onProjectClick: (id: string) => void;
+  biddingStatuses: Record<string, string>;
+  onBiddingStatusUpdate: (id: string, status: string) => void;
+  editingBidStatus: string | null;
+  setEditingBidStatus: (id: string | null) => void;
+}) => (
+  <div className={`${phase.bgColor} border ${phase.borderColor} rounded-2xl overflow-hidden`}>
+    <div className={`p-6 bg-gradient-to-r ${phase.color} bg-opacity-10`}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="p-3 bg-white/10 rounded-xl">
+            <phase.icon className={`h-6 w-6 ${phase.iconColor}`} />
+          </div>
+          <div>
+            <h2 className="text-xl font-semibold text-white">
+              {phase.label}
+            </h2>
+            <p className="text-sm text-slate-300">{phase.description}</p>
+          </div>
+        </div>
+        <span className="text-2xl font-bold text-white">{projects.length}</span>
+      </div>
+    </div>
+    <div className="p-6">
+      <div className="grid gap-4">
+        {projects.map(project => (
+          <ProjectCard
+            key={project.id}
+            project={project}
+            phase={phase}
+            biddingStatus={biddingStatuses[project.id]}
+            onProjectClick={onProjectClick}
+            onBiddingStatusUpdate={onBiddingStatusUpdate}
+            editingBidStatus={editingBidStatus}
+            setEditingBidStatus={setEditingBidStatus}
+          />
+        ))}
+      </div>
+    </div>
+  </div>
+);
+
 // Enhanced Project Card
-const ProjectCard = ({ project, phase, biddingStatus, onBiddingStatusUpdate, editingBidStatus, setEditingBidStatus }: {
+const ProjectCard = ({ project, phase, biddingStatus, onProjectClick, onBiddingStatusUpdate, editingBidStatus, setEditingBidStatus }: {
   project: BoardItem;
   phase: typeof PIPELINE_PHASES[0];
   biddingStatus?: string;
+  onProjectClick: (id: string) => void;
   onBiddingStatusUpdate: (id: string, status: string) => void;
   editingBidStatus: string | null;
   setEditingBidStatus: (id: string | null) => void;
@@ -795,7 +876,12 @@ const ProjectCard = ({ project, phase, biddingStatus, onBiddingStatusUpdate, edi
     <div className="bg-slate-800/50 backdrop-blur-xl border border-slate-700 rounded-xl p-4 hover:border-slate-600 transition-all">
       <div className="flex items-start justify-between mb-3">
         <div className="flex-1">
-          <h3 className="font-semibold text-white text-lg mb-1">{project.title}</h3>
+          <h3 
+            className="font-semibold text-white text-lg mb-1 cursor-pointer hover:text-blue-300 transition-colors" 
+            onClick={() => onProjectClick(project.id)}
+          >
+            {project.title}
+          </h3>
           <div className="flex items-center gap-2 mb-2">
             <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-medium ${phase.bgColor} ${phase.borderColor} border`}>
               <phase.icon className="h-3 w-3" />
@@ -829,7 +915,10 @@ const ProjectCard = ({ project, phase, biddingStatus, onBiddingStatusUpdate, edi
             )}
           </div>
         </div>
-        <ExternalLink className="h-4 w-4 text-slate-400 hover:text-white cursor-pointer" />
+        <ExternalLink 
+          className="h-4 w-4 text-slate-400 hover:text-white cursor-pointer" 
+          onClick={() => onProjectClick(project.id)}
+        />
       </div>
       
       <div className="grid grid-cols-2 gap-2 text-sm">
@@ -855,3 +944,37 @@ const ProjectCard = ({ project, phase, biddingStatus, onBiddingStatusUpdate, edi
     </div>
   );
 };
+
+// Simple placeholder for ProjectDetailPanel
+const ProjectDetailPanel = ({ projectId, onClose }: { projectId: string; onClose: () => void }) => (
+  <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+    <div className="bg-slate-900 rounded-xl p-6 max-w-md w-full">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-xl font-bold text-white">Project Details</h2>
+        <button onClick={onClose} className="text-slate-400 hover:text-white">
+          <X className="h-6 w-6" />
+        </button>
+      </div>
+      <p className="text-slate-400">Project ID: {projectId}</p>
+      <p className="text-sm text-slate-500 mt-2">Full project detail panel coming soon...</p>
+    </div>
+  </div>
+);
+
+export default function OperationsDashboard(props: { 
+  initialKpis: KPI; 
+  initialPendingAcct: ProjectRow[]; 
+}) {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 flex items-center justify-center">
+        <div className="text-center">
+          <div className="h-12 w-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-slate-400">Loading dashboard...</p>
+        </div>
+      </div>
+    }>
+      <DashboardComponent {...props} />
+    </Suspense>
+  );
+}
