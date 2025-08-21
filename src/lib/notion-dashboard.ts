@@ -8,87 +8,36 @@ export const notion = new Client({
   auth: process.env.NOTION_TOKEN || process.env.NOTION_API_KEY,
 })
 
-const env = (k: string) => process.env[k] || ''
-
-export const PROJECTS_DB_ID = env('PROJECTS_DB_ID')
-export const CLIENTS_DB_ID = env('CLIENTS_DB_ID')
-export const TIME_DB_ID = env('TIME_DB_ID') // Used for Photos
-export const IMPROVEMENTS_DB_ID = env('IMPROVEMENTS_DB_ID')
-export const TASKS_DB_ID = env('TASKS_DB_ID')
-export const EXPENSES_DB_ID = env('EXPENSES_DB_ID')
-
-/** -------------------------------
- * Flexible schema (Projects)
- * ------------------------------- */
-type ProjectKeys = {
-  title: string
-  status?: string
-  client?: string
-  clientKind?: 'relation' | 'text'
-  location?: string
-  builder?: string
-  jobAccount?: string
-}
-
-const PROJECT_ALIASES: Record<keyof Omit<ProjectKeys, 'clientKind'>, readonly string[]> = {
-  title: ['Project', 'Name', 'Title'],
-  status: ['Status', 'Status 1', 'Pipeline', 'State'],
-  client: ['Client', 'Customer', 'Account', 'Company', 'Contact'],
-  location: ['Location', 'Address', 'Job Address', 'Job Address (text)'],
-  builder: ['Builder', 'GC', 'General Contractor'],
-  jobAccount: ['Job Account Setup', 'Job Account', 'Account Setup'],
-}
-
-const projectKeyCache = new Map<string, ProjectKeys>()
-
-// Helper to resolve relation page titles
-const titleCache = new Map<string, string>();
-async function getPageTitle(pageId: string): Promise<string> {
-  if (titleCache.has(pageId)) return titleCache.get(pageId)!;
-  try {
-    const page = await notion.pages.retrieve({ page_id: pageId }) as any;
-    const titleProp = Object.values(page.properties).find((p: any) => p?.type === 'title') as any;
-    const title = titleProp?.title?.map((t: any) => t.plain_text).join('') || 'Untitled';
-    titleCache.set(pageId, title);
-    return title;
-  } catch { return 'Untitled Relation' }
-}
-
-async function getProjectKeys(dbId: string): Promise<ProjectKeys> {
-  if (projectKeyCache.has(dbId)) return projectKeyCache.get(dbId)!;
-  const db: any = await notion.databases.retrieve({ database_id: dbId });
-  const props = db.properties || {};
-  const pick = (cands: readonly string[], accept?: (p: any) => boolean) => {
-    for (const name of cands) {
-      if (props[name] && (!accept || accept(props[name]))) return name;
-    }
-  };
-  const clientName = pick(PROJECT_ALIASES.client);
-  const keys: ProjectKeys = {
-    title: pick(PROJECT_ALIASES.title, p => p.type === 'title') || 'Name',
-    status: pick(PROJECT_ALIASES.status, p => p.type === 'status' || p.type === 'select'),
-    client: clientName,
-    clientKind: clientName && props[clientName]?.type === 'relation' ? 'relation' : 'text',
-    location: pick(PROJECT_ALIASES.location),
-    builder: pick(PROJECT_ALIASES.builder),
-    jobAccount: pick(PROJECT_ALIASES.jobAccount, p => p.type === 'checkbox'),
-  };
-  projectKeyCache.set(dbId, keys);
-  return keys;
-}
+// Your actual database IDs
+export const PROJECTS_DB_ID = '223333490a11817390abe4872289edaf'
+export const TASKS_DB_ID = '223333490a118175b75cedd489d8fc9e'
+export const PHOTOS_DB_ID = '223333490a11819cbe48f931fa6ad4b2'
+export const CLIENTS_DB_ID = '223333490a11815fb8dfed884cb88a09'
+export const NOTES_DB_ID = '223333490a1181898ee6c4e52f1d07cb'
+export const EXPENSES_DB_ID = '223333490a118162b8dec59721702e1c'
+export const IMPROVEMENTS_DB_ID = '223333490a1181efbdefdf74b0b4f6a6'
+export const DOCUMENTATION_DB_ID = '223333490a11816bbcd0f0aedc40628c'
 
 /** -------------------------------
  * Property readers
  * ------------------------------- */
 const readTitle = (p: any, key: string) => p?.[key]?.title?.map((t: any) => t.plain_text).join('') || 'Untitled';
+
 const readTextish = (p: any, key?: string) => {
   if (!key || !p[key]) return undefined;
   const prop = p[key];
   if (prop.type === 'rich_text') return prop.rich_text.map((t: any) => t.plain_text).join('');
   if (prop.type === 'select') return prop.select?.name;
   if (prop.type === 'status') return prop.status?.name;
+  if (prop.type === 'checkbox') return prop.checkbox;
+  if (prop.type === 'number') return prop.number;
   if (prop.type === 'files') return prop.files?.[0]?.file?.url;
   return undefined;
+};
+
+const readRelation = (p: any, key: string) => {
+  if (!p[key] || p[key].type !== 'relation') return [];
+  return p[key].relation || [];
 };
 
 const queryAll = async (opts: any) => {
@@ -102,147 +51,389 @@ const queryAll = async (opts: any) => {
   return results;
 };
 
+// Helper to resolve relation page titles
+const titleCache = new Map<string, string>();
+async function getPageTitle(pageId: string): Promise<string> {
+  if (titleCache.has(pageId)) return titleCache.get(pageId)!;
+  try {
+    const page = await notion.pages.retrieve({ page_id: pageId }) as any;
+    const props = page.properties || {};
+    // Find title property
+    const titleProp = Object.values(props).find((p: any) => p?.type === 'title') as any;
+    const title = titleProp?.title?.map((t: any) => t.plain_text).join('') || 'Untitled';
+    titleCache.set(pageId, title);
+    return title;
+  } catch { 
+    return 'Untitled'; 
+  }
+}
+
 /** -------------------------------
  * Public dashboard functions
  * ------------------------------- */
-export const countPostAndBeam = async (): Promise<number> => 0; // Placeholder
-export const listBids = async (): Promise<any[]> => []; // Placeholder
 
+// Count projects in Post & Beam phase
+export const countPostAndBeam = async (): Promise<number> => {
+  try {
+    const results = await queryAll({
+      database_id: PROJECTS_DB_ID,
+      filter: {
+        or: [
+          { property: 'Status', select: { equals: 'Post & Beam' } },
+          { property: 'Status', select: { equals: 'Foundation' } },
+          { property: 'Status', select: { equals: 'Rough-in' } }
+        ]
+      }
+    });
+    return results.length;
+  } catch (e) {
+    console.error('Error counting Post & Beam projects:', e);
+    return 0;
+  }
+};
+
+// List active bids
+export const listBids = async (): Promise<Array<{ id: string; title: string; client?: string }>> => {
+  try {
+    const results = await queryAll({
+      database_id: PROJECTS_DB_ID,
+      filter: {
+        or: [
+          { property: 'Status', select: { equals: 'Bidding' } },
+          { property: 'Status', select: { equals: 'Proposal' } },
+          { property: 'Status', select: { equals: 'Quote Sent' } },
+          { property: 'Status', select: { equals: 'Pending' } }
+        ]
+      }
+    });
+
+    return results.map((r: any) => {
+      const props = r.properties || {};
+      return {
+        id: r.id,
+        title: readTitle(props, 'Project'),
+        client: readTextish(props, 'Client')
+      };
+    });
+  } catch (e) {
+    console.error('Error listing bids:', e);
+    return [];
+  }
+};
+
+// List projects needing job account setup
 export async function listJobAccountPending(): Promise<Array<{ id: string; title: string; client?: string }>> {
-  if (!PROJECTS_DB_ID) return [];
-  const keys = await getProjectKeys(PROJECTS_DB_ID);
-  if (!keys.jobAccount) return [];
+  try {
+    const results = await queryAll({
+      database_id: PROJECTS_DB_ID,
+      filter: {
+        or: [
+          { property: 'Job Account Setup', select: { equals: 'No' } },
+          { property: 'Job Account Setup', select: { is_empty: true } }
+        ]
+      }
+    });
 
-  const results = await queryAll({
-    database_id: PROJECTS_DB_ID,
-    filter: { property: keys.jobAccount, checkbox: { equals: false } },
-  });
-
-  return Promise.all(results.map(async (r: any) => {
-    const p = r.properties || {};
-    const client = keys.client ? (keys.clientKind === 'relation' && p[keys.client].relation?.[0] ? await getPageTitle(p[keys.client].relation[0].id) : readTextish(p, keys.client)) : undefined;
-    return { id: r.id, title: readTitle(p, keys.title), client };
-  }));
+    return results.map((r: any) => {
+      const props = r.properties || {};
+      return {
+        id: r.id,
+        title: readTitle(props, 'Project'),
+        client: readTextish(props, 'Client')
+      };
+    });
+  } catch (e) {
+    console.error('Error listing job account pending:', e);
+    return [];
+  }
 }
 
-export async function listImprovements(openOnly?: boolean): Promise<Array<{ id: string; title: string; status?: string }>> {
-  if (!IMPROVEMENTS_DB_ID) return [];
-  const results = await queryAll({
-    database_id: IMPROVEMENTS_DB_ID,
-    ...(openOnly && { filter: { property: "Status", status: { does_not_equal: "Done" } } })
-  });
-  return results.map(r => ({
-    id: r.id,
-    title: readTitle(r.properties, 'Name'),
-    status: readTextish(r.properties, 'Status'),
-  }));
+// List improvements/issues
+export async function listImprovements(openOnly?: boolean): Promise<Array<{ id: string; title: string; status?: string; projectName?: string }>> {
+  try {
+    const filters: any[] = [];
+    if (openOnly) {
+      filters.push({
+        or: [
+          { property: 'Status', select: { does_not_equal: 'Done' } },
+          { property: 'Status', select: { is_empty: true } }
+        ]
+      });
+    }
+
+    const results = await queryAll({
+      database_id: IMPROVEMENTS_DB_ID,
+      ...(filters.length > 0 && { filter: { and: filters } })
+    });
+
+    return Promise.all(results.map(async (r: any) => {
+      const props = r.properties || {};
+      const projectRelations = readRelation(props, 'Projects');
+      let projectName = '';
+      
+      if (projectRelations.length > 0) {
+        projectName = await getPageTitle(projectRelations[0].id);
+      }
+
+      return {
+        id: r.id,
+        title: readTitle(props, 'Name') || readTitle(props, 'Title') || 'Untitled',
+        status: readTextish(props, 'Status'),
+        projectName
+      };
+    }));
+  } catch (e) {
+    console.error('Error listing improvements:', e);
+    return [];
+  }
 }
 
+// Create new improvement
 export async function createImprovement(input: { projectId: string; title: string }) {
-  if (!IMPROVEMENTS_DB_ID) throw new Error('IMPROVEMENTS_DB_ID missing');
-  await notion.pages.create({
-    parent: { database_id: IMPROVEMENTS_DB_ID },
-    properties: {
-      'Name': { title: [{ text: { content: input.title } }] },
-      'Projects': { relation: [{ id: input.projectId }] }
-    }
-  } as any);
+  try {
+    await notion.pages.create({
+      parent: { database_id: IMPROVEMENTS_DB_ID },
+      properties: {
+        'Name': { title: [{ text: { content: input.title } }] },
+        'Projects': { relation: [{ id: input.projectId }] },
+        'Status': { select: { name: 'Open' } }
+      }
+    } as any);
+  } catch (e) {
+    console.error('Error creating improvement:', e);
+    throw new Error('Failed to create improvement');
+  }
 }
 
+// Update improvement status
 export async function updateImprovementStatus(id: string, status: string) {
-    if (!IMPROVEMENTS_DB_ID) return;
-    await notion.pages.update({ page_id: id, properties: { 'Status': { status: { name: status } } } } as any);
+  try {
+    await notion.pages.update({ 
+      page_id: id, 
+      properties: { 'Status': { select: { name: status } } } 
+    } as any);
+  } catch (e) {
+    console.error('Error updating improvement status:', e);
+    throw new Error('Failed to update improvement status');
+  }
 }
 
+// Toggle job account setup
 export async function toggleJobAccount(id: string, value: boolean) {
-    if (!PROJECTS_DB_ID) return;
-    const keys = await getProjectKeys(PROJECTS_DB_ID);
-    if (keys.jobAccount) {
-        await notion.pages.update({ page_id: id, properties: { [keys.jobAccount]: { checkbox: value } } } as any);
-    }
+  try {
+    await notion.pages.update({ 
+      page_id: id, 
+      properties: { 'Job Account Setup': { select: { name: value ? 'Yes' : 'No' } } } 
+    } as any);
+  } catch (e) {
+    console.error('Error toggling job account:', e);
+    throw new Error('Failed to update job account setup');
+  }
 }
 
+// List all projects for dropdowns
 export async function listProjectOptions(): Promise<Array<{ id: string; title: string }>> {
-  if (!PROJECTS_DB_ID) return [];
-  const keys = await getProjectKeys(PROJECTS_DB_ID);
-  const results = await queryAll({ database_id: PROJECTS_DB_ID, page_size: 100 });
-  return results.map(r => ({ id: r.id, title: readTitle(r.properties, keys.title) }));
+  try {
+    const results = await queryAll({ 
+      database_id: PROJECTS_DB_ID, 
+      page_size: 100,
+      sorts: [{ property: 'Project', direction: 'ascending' }]
+    });
+    
+    return results.map((r: any) => ({ 
+      id: r.id, 
+      title: readTitle(r.properties, 'Project') 
+    }));
+  } catch (e) {
+    console.error('Error listing project options:', e);
+    return [];
+  }
 }
 
+// Get projects for board view with search and filtering
 export async function listProjectsBoard(input: { q?: string; status?: string }): Promise<{
-  items: Array<{ id: string; title: string; status?: string; client?: string; location?: string; builder?: string; }>
+  items: Array<{ 
+    id: string; 
+    title: string; 
+    status?: string; 
+    client?: string; 
+    location?: string; 
+    deadline?: string;
+    budget?: string;
+    budgetSpent?: number;
+  }>
   statusOptions: string[]
 }> {
-  if (!PROJECTS_DB_ID) return { items: [], statusOptions: [] };
-  const keys = await getProjectKeys(PROJECTS_DB_ID);
-  const db: any = await notion.databases.retrieve({ database_id: PROJECTS_DB_ID });
-  const statusOptions = db.properties[keys.status!]?.select?.options.map((o: any) => o.name) || [];
-
-  const filters: any[] = [];
-  if (input.status && input.status !== 'All') {
-    filters.push({ property: keys.status!, select: { equals: input.status } });
-  }
-  if (input.q) {
-    filters.push({
-      or: [
-        { property: keys.title, title: { contains: input.q } },
-        ...(keys.location ? [{ property: keys.location, rich_text: { contains: input.q } }] : []),
-      ]
+  try {
+    // Get all projects first
+    const results = await queryAll({
+      database_id: PROJECTS_DB_ID,
+      sorts: [{ property: 'Last edited time', direction: 'descending' }]
     });
-  }
-  
-  const results = await queryAll({
-    database_id: PROJECTS_DB_ID,
-    ...(filters.length > 0 && { filter: { and: filters } })
-  });
 
-  const items = await Promise.all(results.map(async (r: any) => {
-    const p = r.properties || {};
-    const client = keys.client ? (keys.clientKind === 'relation' && p[keys.client].relation?.[0] ? await getPageTitle(p[keys.client].relation[0].id) : readTextish(p, keys.client)) : undefined;
-    return {
-      id: r.id,
-      title: readTitle(p, keys.title),
-      status: readTextish(p, keys.status),
-      client,
-      location: readTextish(p, keys.location),
-      builder: readTextish(p, keys.builder),
-    };
-  }));
+    // Extract all unique statuses
+    const statusOptions = Array.from(new Set(
+      results.map((r: any) => readTextish(r.properties, 'Status')).filter(Boolean)
+    )) as string[];
 
-  return { items, statusOptions };
-}
+    // Map and filter results
+    let items = results.map((r: any) => {
+      const props = r.properties || {};
+      return {
+        id: r.id,
+        title: readTitle(props, 'Project'),
+        status: readTextish(props, 'Status'),
+        client: readTextish(props, 'Client'),
+        location: readTextish(props, 'Location'),
+        deadline: readTextish(props, 'Deadline'),
+        budget: readTextish(props, 'Budget'),
+        budgetSpent: readTextish(props, 'Budget spent') as number,
+      };
+    });
 
-export async function getProjectFull(id: string): Promise<any> {
-    if (!PROJECTS_DB_ID) throw new Error('PROJECTS_DB_ID missing');
-    const keys = await getProjectKeys(PROJECTS_DB_ID);
-    const page: any = await notion.pages.retrieve({ page_id: id });
-    const p = page.properties || {};
-
-    const client = keys.client ? (keys.clientKind === 'relation' && p[keys.client].relation?.[0] ? await getPageTitle(p[keys.client].relation[0].id) : readTextish(p, keys.client)) : undefined;
-    const project = { id, title: readTitle(p, keys.title), client, location: readTextish(p, keys.location), builder: readTextish(p, keys.builder), status: readTextish(p, keys.status) };
-
-    const timeAndPhotoRows = TIME_DB_ID ? await queryAll({ database_id: TIME_DB_ID, filter: { property: 'Projects', relation: { contains: id } } }) : [];
-    
-    const timeDbProps = TIME_DB_ID ? await notion.databases.retrieve({ database_id: TIME_DB_ID }).then(db => db.properties) : {};
-    const filesKey = Object.keys(timeDbProps).find(k => timeDbProps[k].type === 'files');
-    const titleKey = Object.keys(timeDbProps).find(k => timeDbProps[k].type === 'title');
-
-    const photos = (filesKey && titleKey) ? timeAndPhotoRows
-        .filter(r => r.properties[filesKey]?.files?.length > 0)
-        .map(r => ({ id: r.id, description: readTitle(r.properties, titleKey), url: r.properties[filesKey].files[0].file.url }))
-        : [];
-
-    return { project, photos, improvements: [], tasks: [], expenses: [], time: [] };
-}
-
-export async function createPhotoEntry(input: { projectId: string; description: string; photoUrl: string }) {
-  if (!TIME_DB_ID) throw new Error('TIME_DB_ID for photos is not configured.');
-  await notion.pages.create({
-    parent: { database_id: TIME_DB_ID },
-    properties: {
-      'Name': { title: [{ text: { content: input.description || 'Untitled Photo' } }] },
-      'Photo': { files: [{ name: input.description || input.photoUrl, external: { url: input.photoUrl } }] },
-      'Projects': { relation: [{ id: input.projectId }] },
+    // Apply filters
+    if (input.status && input.status !== 'All') {
+      items = items.filter(item => item.status === input.status);
     }
-  } as any);
+
+    if (input.q) {
+      const query = input.q.toLowerCase();
+      items = items.filter(item =>
+        [item.title, item.client, item.location].some(v => 
+          (v || '').toLowerCase().includes(query)
+        )
+      );
+    }
+
+    return { items, statusOptions };
+  } catch (e) {
+    console.error('Error listing projects board:', e);
+    return { items: [], statusOptions: [] };
+  }
+}
+
+// Get full project details
+export async function getProjectFull(id: string): Promise<any> {
+  try {
+    const page: any = await notion.pages.retrieve({ page_id: id });
+    const props = page.properties || {};
+
+    const project = {
+      id,
+      title: readTitle(props, 'Project'),
+      client: readTextish(props, 'Client'),
+      location: readTextish(props, 'Location'),
+      status: readTextish(props, 'Status'),
+      budget: readTextish(props, 'Budget'),
+      spent: readTextish(props, 'Spent'),
+      budgetSpent: readTextish(props, 'Budget spent'),
+      totalHours: readTextish(props, 'Total hours'),
+      totalExpenses: readTextish(props, 'Total expenses'),
+      deadline: readTextish(props, 'Deadline'),
+      projectManager: readTextish(props, 'Project manager'),
+      team: readTextish(props, 'Team'),
+      subDivision: readTextish(props, 'Sub-Division'),
+      constructionPhase: readTextish(props, 'Construction Phase'),
+    };
+
+    // Get related photos
+    const photoResults = await queryAll({
+      database_id: PHOTOS_DB_ID,
+      filter: { property: 'Projects', relation: { contains: id } }
+    });
+
+    const photos = photoResults.map((photo: any) => {
+      const photoProps = photo.properties || {};
+      const files = photoProps['Files & media']?.files || photoProps['Photo']?.files || [];
+      return {
+        id: photo.id,
+        description: readTitle(photoProps, 'Name') || readTitle(photoProps, 'Title') || 'Photo',
+        url: files[0]?.file?.url || files[0]?.external?.url || ''
+      };
+    }).filter((photo: any) => photo.url);
+
+    // Get related tasks
+    const taskResults = await queryAll({
+      database_id: TASKS_DB_ID,
+      filter: { property: 'Projects', relation: { contains: id } }
+    });
+
+    const tasks = taskResults.map((task: any) => {
+      const taskProps = task.properties || {};
+      return {
+        id: task.id,
+        title: readTitle(taskProps, 'Task'),
+        status: readTextish(taskProps, 'Status'),
+        assignee: readTextish(taskProps, 'Asignee'),
+        due: readTextish(taskProps, 'Due Date'),
+        category: readTextish(taskProps, 'Category'),
+        comment: readTextish(taskProps, 'Comment')
+      };
+    });
+
+    // Get related improvements
+    const improvementResults = await queryAll({
+      database_id: IMPROVEMENTS_DB_ID,
+      filter: { property: 'Projects', relation: { contains: id } }
+    });
+
+    const improvements = improvementResults.map((improvement: any) => {
+      const improvementProps = improvement.properties || {};
+      return {
+        id: improvement.id,
+        title: readTitle(improvementProps, 'Name') || readTitle(improvementProps, 'Title') || 'Improvement',
+        status: readTextish(improvementProps, 'Status')
+      };
+    });
+
+    // Get related expenses
+    const expenseResults = await queryAll({
+      database_id: EXPENSES_DB_ID,
+      filter: { property: 'Projects', relation: { contains: id } }
+    });
+
+    const expenses = expenseResults.map((expense: any) => {
+      const expenseProps = expense.properties || {};
+      return {
+        id: expense.id,
+        name: readTitle(expenseProps, 'Name') || readTitle(expenseProps, 'Title') || 'Expense',
+        category: readTextish(expenseProps, 'Category'),
+        value: readTextish(expenseProps, 'Amount') || readTextish(expenseProps, 'Value') || 0
+      };
+    });
+
+    return { 
+      project, 
+      photos, 
+      tasks, 
+      improvements, 
+      expenses, 
+      time: [] // Time tracking to be implemented if needed
+    };
+  } catch (e) {
+    console.error('Error getting project full:', e);
+    throw new Error('Failed to fetch project details');
+  }
+}
+
+// Create photo entry
+export async function createPhotoEntry(input: { projectId: string; description: string; photoUrl: string }) {
+  try {
+    await notion.pages.create({
+      parent: { database_id: PHOTOS_DB_ID },
+      properties: {
+        'Name': { title: [{ text: { content: input.description || 'Photo' } }] },
+        'Projects': { relation: [{ id: input.projectId }] },
+        'Files & media': { 
+          files: [{ 
+            name: input.description || 'Photo',
+            external: { url: input.photoUrl } 
+          }] 
+        }
+      }
+    } as any);
+  } catch (e) {
+    console.error('Error creating photo entry:', e);
+    throw new Error('Failed to create photo entry');
+  }
 }

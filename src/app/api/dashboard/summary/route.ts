@@ -13,7 +13,7 @@ export async function GET() {
       countPostAndBeam(),
       listBids(),
       listJobAccountPending(),
-      listImprovements(true), // <-- boolean, not object
+      listImprovements(true), // open only
     ])
 
     return NextResponse.json({
@@ -25,6 +25,15 @@ export async function GET() {
       },
     })
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 })
+    console.error('Dashboard summary API error:', e);
+    return NextResponse.json({ 
+      error: e?.message || 'Server error',
+      kpis: {
+        postAndBeam: 0,
+        activeBids: 0,
+        jobAccountsPending: 0,
+        openProblems: 0,
+      }
+    }, { status: 500 })
   }
 }

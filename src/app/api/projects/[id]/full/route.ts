@@ -7,9 +7,18 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
+    if (!params.id) {
+      return NextResponse.json({ 
+        error: 'Project ID is required' 
+      }, { status: 400 })
+    }
+
     const data = await getProjectFull(params.id)
     return NextResponse.json(data)
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 })
+    console.error('Project full API error:', e);
+    return NextResponse.json({ 
+      error: e?.message || 'Failed to fetch project details' 
+    }, { status: 500 })
   }
 }

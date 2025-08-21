@@ -1,3 +1,4 @@
+// src/app/api/photos/route.ts
 import { NextResponse } from 'next/server';
 import { put } from '@vercel/blob';
 import { createPhotoEntry } from '@/lib/notion-dashboard';
@@ -9,8 +10,16 @@ export async function POST(req: Request) {
     const projectId = formData.get('projectId') as string;
     const description = formData.get('description') as string;
 
-    if (!file || !projectId) {
-      return NextResponse.json({ error: 'Missing file or project ID' }, { status: 400 });
+    if (!file) {
+      return NextResponse.json({ 
+        error: 'No file provided' 
+      }, { status: 400 });
+    }
+
+    if (!projectId) {
+      return NextResponse.json({ 
+        error: 'Project ID is required' 
+      }, { status: 400 });
     }
 
     // Upload file to Vercel Blob storage
@@ -18,17 +27,23 @@ export async function POST(req: Request) {
       access: 'public',
     });
 
-    // Create an entry in the Notion "Photos" database
+    // Create an entry in the Notion Photos database
     await createPhotoEntry({
       projectId,
       description: description || file.name,
       photoUrl: blob.url,
     });
 
-    return NextResponse.json({ ok: true, url: blob.url });
+    return NextResponse.json({ 
+      ok: true, 
+      url: blob.url,
+      message: 'Photo uploaded successfully'
+    });
 
   } catch (e: any) {
     console.error('Photo upload error:', e);
-    return NextResponse.json({ error: e.message || 'Server error during photo upload' }, { status: 500 });
+    return NextResponse.json({ 
+      error: e?.message || 'Failed to upload photo' 
+    }, { status: 500 });
   }
 }
