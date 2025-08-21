@@ -1,9 +1,6 @@
 import './globals.css'
 import type { Metadata, Viewport } from 'next'
-import { Inter } from 'next/font/google'
 import Header from '@/components/Header'
-
-const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
   title: 'ACP — Operations',
@@ -19,7 +16,7 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className="h-full">
-      <body className={`${inter.className} min-h-screen bg-background text-foreground`}>
+      <body className={`min-h-screen bg-background text-foreground`}>
         <Header />
         <main>{children}</main>
       </body>
