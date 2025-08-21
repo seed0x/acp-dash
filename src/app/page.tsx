@@ -15,9 +15,9 @@ export default async function Page() {
     listBids(),
     listJobAccountPending(),
     listImprovements(true),
-  ] as const).catch(err => { // The "as const" here fixes the type inference issue
+  ] as const).catch(err => {
     console.error("Failed to fetch initial data:", err);
-    return [0, [], [], []] as const; // Also added here for type consistency in case of an error
+    return [0, [], [], []] as const;
   });
 
   const initialKpis = {
@@ -34,8 +34,8 @@ export default async function Page() {
       </p>
       <OperationsDashboard
         initialKpis={initialKpis}
-        initialPendingAcct={pendingAcct}
-        initialProblems={improvements}
+        initialPendingAcct={[...pendingAcct]}
+        initialProblems={[...improvements]}
       />
     </div>
   )
