@@ -28,14 +28,10 @@ export default async function Page() {
   };
 
   return (
-    <div className="max-w-7xl mx-auto p-6 space-y-4">
-      <p className="text-sm text-[var(--muted)]">
-        A real-time dashboard for job tracking, upgrades, and active issues.
-      </p>
+    <div className="max-w-screen-xl mx-auto">
       <OperationsDashboard
         initialKpis={initialKpis}
         initialPendingAcct={[...pendingAcct]}
-        initialProblems={[...improvements]}
       />
     </div>
   )

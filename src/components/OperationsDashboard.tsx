@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { Plus, Camera, CheckCircle2, Search, Briefcase } from 'lucide-react';
+import { Plus, Camera, CheckCircle2, Search } from 'lucide-react';
 import ProjectDetailPanel from './ProjectDetailPanel';
 
 // Type definitions
