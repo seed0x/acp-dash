@@ -37,13 +37,13 @@ type ProjectOption = {
   title: string; 
 };
 
-// Pipeline phases configuration
+// Pipeline phases configuration - FIXED for case-insensitive matching
 const PIPELINE_PHASES = [
   { 
     key: 'bidding', 
     label: 'Bidding', 
     icon: FileText, 
-    statuses: ['Bidding', 'Proposal', 'Quote Sent', 'Pending'],
+    statuses: ['bidding', 'proposal', 'quote sent', 'pending'],
     color: 'bg-yellow-500/20 border-yellow-500/30',
     iconColor: 'text-yellow-400',
     headerColor: 'bg-yellow-500/10'
@@ -52,7 +52,7 @@ const PIPELINE_PHASES = [
     key: 'post-beam', 
     label: 'Post & Beam', 
     icon: Hammer, 
-    statuses: ['Post & Beam', 'Foundation', 'Rough-in'],
+    statuses: ['post & beam', 'foundation', 'rough-in', 'rough in'],
     color: 'bg-blue-500/20 border-blue-500/30',
     iconColor: 'text-blue-400',
     headerColor: 'bg-blue-500/10'
@@ -61,7 +61,7 @@ const PIPELINE_PHASES = [
     key: 'top-out', 
     label: 'Top Out', 
     icon: TrendingUp, 
-    statuses: ['Top Out', 'Topping Out', 'Structure Complete'],
+    statuses: ['top out', 'topping out', 'structure complete'],
     color: 'bg-purple-500/20 border-purple-500/30',
     iconColor: 'text-purple-400',
     headerColor: 'bg-purple-500/10'
@@ -70,7 +70,7 @@ const PIPELINE_PHASES = [
     key: 'trim', 
     label: 'Trim', 
     icon: PaintBucket, 
-    statuses: ['Trim', 'Finishing', 'Final'],
+    statuses: ['trim', 'finishing', 'final'],
     color: 'bg-green-500/20 border-green-500/30',
     iconColor: 'text-green-400',
     headerColor: 'bg-green-500/10'
@@ -79,7 +79,7 @@ const PIPELINE_PHASES = [
     key: 'invoice-ready', 
     label: 'Invoice Ready', 
     icon: CreditCard, 
-    statuses: ['Invoice Ready', 'Complete', 'Ready to Bill', 'Billing'],
+    statuses: ['invoice ready', 'complete', 'ready to bill', 'billing', 'completed'],
     color: 'bg-emerald-500/20 border-emerald-500/30',
     iconColor: 'text-emerald-400',
     headerColor: 'bg-emerald-500/10'
@@ -98,8 +98,9 @@ async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
 function getProjectPhase(status?: string) {
   if (!status) return 'other';
   
+  const statusLower = status.toLowerCase();
   for (const phase of PIPELINE_PHASES) {
-    if (phase.statuses.some(s => status.toLowerCase().includes(s.toLowerCase()))) {
+    if (phase.statuses.some(s => statusLower.includes(s))) {
       return phase.key;
     }
   }
@@ -158,11 +159,16 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: {
     setBoardLoading(true);
     try {
       setError(null);
-      const qs = new URLSearchParams({ q: query });
+      const qs = new URLSearchParams({ q: query, status: 'All' });
       const data = await fetchJSON<{ items: BoardItem[]; statusOptions: string[] }>(`/api/projects/board?${qs}`);
       setBoardItems(data.items || []);
+      if (data.statusOptions && data.statusOptions.length > 0) {
+        // Don't override if we already have status options
+        setStatusOptions(prev => prev.length > 1 ? prev : ['All', ...data.statusOptions]);
+      }
     } catch (e: any) { 
       setError(`Failed to load projects: ${e.message}`);
+      setBoardItems([]); // Clear items on error
     } finally { 
       setBoardLoading(false);
     }
@@ -186,42 +192,76 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: {
   }, [boardItems, selectedPhase]);
 
   const handleActionSubmit = async (type: 'photo' | 'upgrade') => {
-    if (!actionProjectId) return;
+    if (!actionProjectId) {
+      setError('Please select a project first');
+      return;
+    }
+    
+    if (type === 'photo' && !photoFile) {
+      setError('Please select a photo file');
+      return;
+    }
+    
+    if (type === 'upgrade' && !upgradeTitle.trim()) {
+      setError('Please enter an improvement description');
+      return;
+    }
+
     setIsSubmitting(true);
     setError(null);
+    
     try {
       if (type === 'photo' && photoFile) {
         const formData = new FormData();
         formData.append('file', photoFile);
         formData.append('projectId', actionProjectId);
-        formData.append('description', photoDescription);
+        formData.append('description', photoDescription.trim() || photoFile.name);
         
         const response = await fetch('/api/photos', { method: 'POST', body: formData });
+        const result = await response.json();
+        
         if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.error || 'Failed to upload photo');
+          throw new Error(result.error || 'Failed to upload photo');
         }
         
+        // Success - reset form
         setPhotoFile(null); 
         setPhotoDescription('');
         setShowPhotoUpload(false);
         const fileInput = document.getElementById('photo-file-input') as HTMLInputElement;
         if (fileInput) fileInput.value = '';
-      } else if (type === 'upgrade' && upgradeTitle) {
+        
+        // Show success message briefly
+        const successMessage = `Photo uploaded successfully to ${projects.find(p => p.id === actionProjectId)?.title}`;
+        setError(null);
+        
+      } else if (type === 'upgrade' && upgradeTitle.trim()) {
         const response = await fetch('/api/improvements', { 
           method: 'POST', 
           headers: { 'Content-Type': 'application/json' }, 
-          body: JSON.stringify({ projectId: actionProjectId, title: upgradeTitle }) 
+          body: JSON.stringify({ 
+            projectId: actionProjectId, 
+            title: upgradeTitle.trim() 
+          }) 
         });
+        const result = await response.json();
+        
         if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.error || 'Failed to add improvement');
+          throw new Error(result.error || 'Failed to add improvement');
         }
+        
+        // Success - reset form
         setUpgradeTitle('');
+        
+        // Show success message briefly
+        const successMessage = `Improvement added to ${projects.find(p => p.id === actionProjectId)?.title}`;
+        setError(null);
       }
+      
+      // Reload data to reflect changes
       await loadData();
     } catch (e: any) { 
-      setError(e.message);
+      setError(e.message || 'An unexpected error occurred');
     } finally { 
       setIsSubmitting(false);
     }
@@ -347,6 +387,17 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: {
                     <div key={i} className="h-32 bg-slate-800/50 rounded-xl animate-pulse" />
                   ))}
                 </div>
+              ) : boardItems.length === 0 ? (
+                <div className="text-center py-16 bg-slate-900/30 rounded-xl border border-slate-800">
+                  <Building className="h-16 w-16 text-slate-400 mx-auto mb-4" />
+                  <h3 className="text-xl font-semibold text-slate-100 mb-2">No Projects Found</h3>
+                  <p className="text-slate-400 mb-4">
+                    {query ? `No projects match "${query}"` : 'No projects in your Notion database yet'}
+                  </p>
+                  <p className="text-sm text-slate-500">
+                    {query ? 'Try adjusting your search terms' : 'Add projects to your Notion database to see them here'}
+                  </p>
+                </div>
               ) : selectedPhase === 'all' ? (
                 // Show by phases when "all" is selected
                 PIPELINE_PHASES.map(phase => {
@@ -471,30 +522,47 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: {
             </div>
 
             {/* Add Improvement */}
-            <ActionCard title="Add Improvement" icon={Plus}>
+            {/* Add Improvement/Issue */}
+            <ActionCard title="Add Issue/Improvement" icon={Plus}>
               <div className="space-y-3">
-                <select 
-                  value={actionProjectId} 
-                  onChange={e => setActionProjectId(e.target.value)} 
-                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-slate-100"
-                >
-                  <option value="">Choose a lot...</option>
-                  {projects.map(p => (
-                    <option key={p.id} value={p.id}>{p.title}</option>
-                  ))}
-                </select>
-                <input 
-                  value={upgradeTitle} 
-                  onChange={e => setUpgradeTitle(e.target.value)} 
-                  placeholder="Improvement description..." 
-                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-slate-100 placeholder-slate-400"
-                />
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">Project</label>
+                  <select 
+                    value={actionProjectId} 
+                    onChange={e => setActionProjectId(e.target.value)} 
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-slate-100"
+                  >
+                    <option value="">Choose a lot...</option>
+                    {projects.map(p => (
+                      <option key={p.id} value={p.id}>{p.title}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">Issue Description</label>
+                  <input 
+                    value={upgradeTitle} 
+                    onChange={e => setUpgradeTitle(e.target.value)} 
+                    placeholder="e.g., Plumbing leak in bathroom, Need electrical upgrade..." 
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-slate-100 placeholder-slate-400"
+                  />
+                </div>
                 <button 
                   onClick={() => handleActionSubmit('upgrade')} 
-                  disabled={isSubmitting || !upgradeTitle || !actionProjectId} 
-                  className="w-full bg-green-600 hover:bg-green-700 disabled:bg-slate-700 disabled:text-slate-400 text-white py-2 px-4 rounded-lg font-medium transition-colors"
+                  disabled={isSubmitting || !upgradeTitle.trim() || !actionProjectId} 
+                  className="w-full bg-orange-600 hover:bg-orange-700 disabled:bg-slate-700 disabled:text-slate-400 text-white py-2 px-4 rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
                 >
-                  {isSubmitting ? 'Adding...' : 'Add Improvement'}
+                  {isSubmitting ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      Adding...
+                    </>
+                  ) : (
+                    <>
+                      <Plus className="h-4 w-4" />
+                      Add Issue
+                    </>
+                  )}
                 </button>
               </div>
             </ActionCard>

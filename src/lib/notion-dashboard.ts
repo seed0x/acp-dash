@@ -19,7 +19,7 @@ export const IMPROVEMENTS_DB_ID = '223333490a1181efbdefdf74b0b4f6a6'
 export const DOCUMENTATION_DB_ID = '223333490a11816bbcd0f0aedc40628c'
 
 /** -------------------------------
- * Property readers
+ * Property readers - FIXED FOR ACTUAL TYPES
  * ------------------------------- */
 const readTitle = (p: any, key: string) => p?.[key]?.title?.map((t: any) => t.plain_text).join('') || 'Untitled';
 
@@ -28,7 +28,7 @@ const readTextish = (p: any, key?: string) => {
   const prop = p[key];
   if (prop.type === 'rich_text') return prop.rich_text.map((t: any) => t.plain_text).join('');
   if (prop.type === 'select') return prop.select?.name;
-  if (prop.type === 'status') return prop.status?.name;
+  if (prop.type === 'status') return prop.status?.name; // FIXED: Added status type
   if (prop.type === 'checkbox') return prop.checkbox;
   if (prop.type === 'number') return prop.number;
   if (prop.type === 'files') return prop.files?.[0]?.file?.url;
@@ -70,10 +70,10 @@ async function getPageTitle(pageId: string): Promise<string> {
 }
 
 /** -------------------------------
- * Public dashboard functions
+ * Public dashboard functions - FIXED FILTER TYPES
  * ------------------------------- */
 
-// Count projects in Post & Beam phase - FIXED FILTER SYNTAX
+// Count projects in Post & Beam phase - FIXED: status type, not select
 export const countPostAndBeam = async (): Promise<number> => {
   try {
     console.log('Counting Post & Beam projects...');
@@ -81,9 +81,9 @@ export const countPostAndBeam = async (): Promise<number> => {
       database_id: PROJECTS_DB_ID,
       filter: {
         or: [
-          { property: 'Status', select: { equals: 'Post & Beam' } },
-          { property: 'Status', select: { equals: 'Foundation' } },
-          { property: 'Status', select: { equals: 'Rough-in' } }
+          { property: 'Status', status: { equals: 'Post & Beam' } },
+          { property: 'Status', status: { equals: 'Foundation' } },
+          { property: 'Status', status: { equals: 'Rough-in' } }
         ]
       }
     });
@@ -95,7 +95,7 @@ export const countPostAndBeam = async (): Promise<number> => {
   }
 };
 
-// List active bids - FIXED FILTER SYNTAX
+// List active bids - FIXED: status type, not select
 export const listBids = async (): Promise<Array<{ id: string; title: string; client?: string }>> => {
   try {
     console.log('Listing active bids...');
@@ -103,10 +103,10 @@ export const listBids = async (): Promise<Array<{ id: string; title: string; cli
       database_id: PROJECTS_DB_ID,
       filter: {
         or: [
-          { property: 'Status', select: { equals: 'Bidding' } },
-          { property: 'Status', select: { equals: 'Proposal' } },
-          { property: 'Status', select: { equals: 'Quote Sent' } },
-          { property: 'Status', select: { equals: 'Pending' } }
+          { property: 'Status', status: { equals: 'Bidding' } },
+          { property: 'Status', status: { equals: 'Proposal' } },
+          { property: 'Status', status: { equals: 'Quote Sent' } },
+          { property: 'Status', status: { equals: 'Pending' } }
         ]
       }
     });
@@ -128,7 +128,7 @@ export const listBids = async (): Promise<Array<{ id: string; title: string; cli
   }
 };
 
-// List projects needing job account setup - FIXED FILTER SYNTAX
+// List projects needing job account setup - FIXED: checkbox type
 export async function listJobAccountPending(): Promise<Array<{ id: string; title: string; client?: string }>> {
   try {
     console.log('Listing job account pending...');
@@ -136,8 +136,8 @@ export async function listJobAccountPending(): Promise<Array<{ id: string; title
       database_id: PROJECTS_DB_ID,
       filter: {
         or: [
-          { property: 'Job Account Setup', select: { equals: 'No' } },
-          { property: 'Job Account Setup', select: { is_empty: true } }
+          { property: 'Job Account Setup', checkbox: { equals: false } },
+          { property: 'Job Account Setup', checkbox: { is_empty: true } }
         ]
       }
     });
@@ -159,7 +159,7 @@ export async function listJobAccountPending(): Promise<Array<{ id: string; title
   }
 }
 
-// List improvements/issues - FIXED FILTER SYNTAX
+// List improvements/issues - FIXED: property name and status type
 export async function listImprovements(openOnly?: boolean): Promise<Array<{ id: string; title: string; status?: string; projectName?: string }>> {
   try {
     console.log('Listing improvements...');
@@ -167,8 +167,8 @@ export async function listImprovements(openOnly?: boolean): Promise<Array<{ id: 
     if (openOnly) {
       filters.push({
         or: [
-          { property: 'Status', select: { does_not_equal: 'Done' } },
-          { property: 'Status', select: { is_empty: true } }
+          { property: 'Status', status: { does_not_equal: 'Done' } },
+          { property: 'Status', status: { is_empty: true } }
         ]
       });
     }
@@ -189,7 +189,7 @@ export async function listImprovements(openOnly?: boolean): Promise<Array<{ id: 
 
       return {
         id: r.id,
-        title: readTitle(props, 'Name') || readTitle(props, 'Title') || 'Untitled',
+        title: readTitle(props, 'Improvement'), // FIXED: Use correct property name
         status: readTextish(props, 'Status'),
         projectName
       };
@@ -203,16 +203,16 @@ export async function listImprovements(openOnly?: boolean): Promise<Array<{ id: 
   }
 }
 
-// Create new improvement
+// Create new improvement - FIXED: property name
 export async function createImprovement(input: { projectId: string; title: string }) {
   try {
     console.log(`Creating improvement for project ${input.projectId}: ${input.title}`);
     await notion.pages.create({
       parent: { database_id: IMPROVEMENTS_DB_ID },
       properties: {
-        'Name': { title: [{ text: { content: input.title } }] },
+        'Improvement': { title: [{ text: { content: input.title } }] }, // FIXED: Use correct property name
         'Projects': { relation: [{ id: input.projectId }] },
-        'Status': { select: { name: 'Open' } }
+        'Status': { status: { name: 'Open' } } // FIXED: status type
       }
     } as any);
     console.log('Improvement created successfully');
@@ -222,12 +222,12 @@ export async function createImprovement(input: { projectId: string; title: strin
   }
 }
 
-// Update improvement status
+// Update improvement status - FIXED: status type
 export async function updateImprovementStatus(id: string, status: string) {
   try {
     await notion.pages.update({ 
       page_id: id, 
-      properties: { 'Status': { select: { name: status } } } 
+      properties: { 'Status': { status: { name: status } } } // FIXED: status type
     } as any);
   } catch (e) {
     console.error('Error updating improvement status:', e);
@@ -235,12 +235,12 @@ export async function updateImprovementStatus(id: string, status: string) {
   }
 }
 
-// Toggle job account setup
+// Toggle job account setup - FIXED: checkbox type
 export async function toggleJobAccount(id: string, value: boolean) {
   try {
     await notion.pages.update({ 
       page_id: id, 
-      properties: { 'Job Account Setup': { select: { name: value ? 'Yes' : 'No' } } } 
+      properties: { 'Job Account Setup': { checkbox: value } } // FIXED: checkbox type
     } as any);
   } catch (e) {
     console.error('Error toggling job account:', e);
@@ -360,7 +360,7 @@ export async function getProjectFull(id: string): Promise<any> {
       constructionPhase: readTextish(props, 'Construction Phase'),
     };
 
-    // Get related photos - FIXED PROPERTY NAMES
+    // Get related photos - FIXED: Use correct property names
     const photoResults = await queryAll({
       database_id: PHOTOS_DB_ID,
       filter: { property: 'Projects', relation: { contains: id } }
@@ -368,7 +368,7 @@ export async function getProjectFull(id: string): Promise<any> {
 
     const photos = photoResults.map((photo: any) => {
       const photoProps = photo.properties || {};
-      const files = photoProps['Files & media']?.files || [];
+      const files = photoProps['Photo']?.files || []; // FIXED: Use 'Photo' property
       return {
         id: photo.id,
         description: readTitle(photoProps, 'Name') || 'Photo',
@@ -395,7 +395,7 @@ export async function getProjectFull(id: string): Promise<any> {
       };
     });
 
-    // Get related improvements
+    // Get related improvements - FIXED: Use correct property name
     const improvementResults = await queryAll({
       database_id: IMPROVEMENTS_DB_ID,
       filter: { property: 'Projects', relation: { contains: id } }
@@ -405,7 +405,7 @@ export async function getProjectFull(id: string): Promise<any> {
       const improvementProps = improvement.properties || {};
       return {
         id: improvement.id,
-        title: readTitle(improvementProps, 'Name') || 'Improvement',
+        title: readTitle(improvementProps, 'Improvement'), // FIXED: Use correct property name
         status: readTextish(improvementProps, 'Status')
       };
     });
@@ -441,21 +441,17 @@ export async function getProjectFull(id: string): Promise<any> {
   }
 }
 
-// Create photo entry - FIXED PROPERTY NAMES
+// Create photo entry - FIXED: Use correct property names
 export async function createPhotoEntry(input: { projectId: string; description: string; photoUrl: string }) {
   try {
     console.log(`Creating photo entry for project ${input.projectId}: ${input.description}`);
-    
-    // First, let's check the Photos database structure
-    const photosDB = await notion.databases.retrieve({ database_id: PHOTOS_DB_ID });
-    console.log('Photos DB properties:', Object.keys((photosDB as any).properties));
     
     await notion.pages.create({
       parent: { database_id: PHOTOS_DB_ID },
       properties: {
         'Name': { title: [{ text: { content: input.description || 'Photo' } }] },
         'Projects': { relation: [{ id: input.projectId }] },
-        'Files & media': { 
+        'Photo': { // FIXED: Use correct property name from debug output
           files: [{ 
             name: input.description || 'Photo',
             external: { url: input.photoUrl } 
