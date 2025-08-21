@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 
 type ProjectFull = {
-  project: { id: string; title: string; client?: string; location?: string; status?: string; budget?: number; spent?: number; totalExpenses?: number; totalHours?: number; openTasks?: number; openImprovements?: number; };
+  project: { id: string; title: string; client?: string; location?: string; builder?: string; status?: string; budget?: number; spent?: number; totalExpenses?: number; totalHours?: number; openTasks?: number; openImprovements?: number; };
   improvements: Array<{ id: string; title: string; status?: string }>;
   tasks: Array<{ id: string; title: string; status?: string; assignee?: string; due?: string }>;
   expenses: Array<{ id: string; name: string; category?: string; value?: number }>;
@@ -102,6 +102,8 @@ const DetailsTab = ({ project }: { project: ProjectFull['project'] }) => (
       <h3 className="font-bold mb-2">Key Info</h3>
       <div className="grid grid-cols-2 gap-4 text-sm">
         <div><div className="text-[var(--muted)]">Status</div><div className="font-semibold">{project.status || '-'}</div></div>
+        <div><div className="text-[var(--muted)]">Client</div><div className="font-semibold">{project.client || '-'}</div></div>
+        <div><div className="text-[var(--muted)]">Builder</div><div className="font-semibold">{project.builder || '-'}</div></div>
         {project.location && (
           <div>
             <div className="text-[var(--muted)]">Address</div>

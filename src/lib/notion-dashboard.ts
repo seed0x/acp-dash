@@ -2,8 +2,8 @@
 import { Client } from '@notionhq/client'
 
 /** -------------------------------
- *  Notion client + DB ID helpers
- *  ------------------------------- */
+ * Notion client + DB ID helpers
+ * ------------------------------- */
 export const notion = new Client({
   auth: process.env.NOTION_TOKEN || process.env.NOTION_API_KEY,
 })
@@ -12,6 +12,9 @@ const env = (k: string) => process.env[k]
 
 export const PROJECTS_DB_ID =
   env('NEXT_PUBLIC_NOTION_PROJECTS_DB_ID') || env('NOTION_PROJECTS_DB_ID') || env('PROJECTS_DB_ID') || ''
+
+export const CLIENTS_DB_ID = 
+  env('NEXT_PUBLIC_NOTION_CLIENTS_DB_ID') || env('NOTION_CLIENTS_DB_ID') || env('CLIENTS_DB_ID') || ''
 
 export const IMPROVEMENTS_DB_ID =
   env('NEXT_PUBLIC_NOTION_IMPROVEMENTS_DB_ID') || env('NOTION_IMPROVEMENTS_DB_ID') || env('IMPROVEMENTS_DB_ID') || ''
@@ -32,14 +35,16 @@ export const DOCS_DB_ID =
   env('NEXT_PUBLIC_NOTION_DOCS_DB_ID') || env('NOTION_DOCS_DB_ID') || env('DOCS_DB_ID') || ''
 
 /** -------------------------------
- *  Flexible schema (Projects)
- *  ------------------------------- */
+ * Flexible schema (Projects)
+ * ------------------------------- */
 type ProjectKeys = {
   title: string
   status?: string
   statusKind?: 'status' | 'select'
   client?: string
+  clientKind?: 'relation' | 'text'
   location?: string
+  builder?: string
   jobAccount?: string
   followUp?: string
   budget?: string
@@ -47,11 +52,12 @@ type ProjectKeys = {
   deadline?: string
 }
 
-const PROJECT_ALIASES: Record<keyof Omit<ProjectKeys, 'statusKind'>, readonly string[]> = {
+const PROJECT_ALIASES: Record<keyof Omit<ProjectKeys, 'statusKind' | 'clientKind'>, readonly string[]> = {
   title: ['Project', 'Name', 'Title'],
   status: ['Status', 'Status 1', 'Pipeline', 'State'],
   client: ['Client', 'Customer', 'Account', 'Company', 'Contact'],
   location: ['Location', 'Address', 'Job Address', 'Job Address (text)'],
+  builder: ['Builder', 'GC', 'General Contractor'],
   jobAccount: ['Job Account Setup', 'Job Account', 'Account Setup'],
   followUp: ['Need follow-up', 'Need Follow-up', 'Follow up', 'Follow-up', 'Follow Up'],
   budget: ['Budget'],
@@ -61,39 +67,61 @@ const PROJECT_ALIASES: Record<keyof Omit<ProjectKeys, 'statusKind'>, readonly st
 
 const projectKeyCache = new Map<string, ProjectKeys>()
 
+// Helper to resolve relation page titles with a tiny cache
+const titleCache = new Map<string, string>();
+async function getPageTitle(pageId: string): Promise<string> {
+  if (titleCache.has(pageId)) return titleCache.get(pageId)!;
+  try {
+    const page = await notion.pages.retrieve({ page_id: pageId }) as any;
+    const props = page.properties || {};
+    const titleProp = Object.values(props).find((p: any) => p?.type === 'title') as any;
+    const title = titleProp?.title?.map((t: any) => t.plain_text).join('') || 'Untitled';
+    titleCache.set(pageId, title);
+    return title;
+  } catch {
+    return 'Untitled Relation';
+  }
+}
+
+
 async function getProjectKeys(dbId: string): Promise<ProjectKeys> {
   if (projectKeyCache.has(dbId)) return projectKeyCache.get(dbId)!
   const db: any = await notion.databases.retrieve({ database_id: dbId })
   const props: Record<string, any> = db.properties || {}
 
-  const pick = (cands: readonly string[], accept?: (t: string) => boolean) => {
+  const pick = (cands: readonly string[], accept?: (p: any) => boolean) => {
     for (const name of cands) {
       const p = props[name]
-      if (!p) continue
-      if (!accept || accept(p.type)) return name
+      if (p && (!accept || accept(p))) return name
     }
     return undefined
   }
 
-  const title = pick(PROJECT_ALIASES.title, t => t === 'title')
-  const statusName = pick(PROJECT_ALIASES.status, t => t === 'status' || t === 'select')
-  const client = pick(PROJECT_ALIASES.client)
+  const title = pick(PROJECT_ALIASES.title, p => p.type === 'title')
+  const statusName = pick(PROJECT_ALIASES.status, p => p.type === 'status' || p.type === 'select')
+  const clientName = pick(PROJECT_ALIASES.client)
   const location = pick(PROJECT_ALIASES.location)
-  const jobAccount = pick(PROJECT_ALIASES.jobAccount, t => t === 'checkbox')
-  const followUp = pick(PROJECT_ALIASES.followUp, t => ['checkbox', 'select', 'status'].includes(t))
-  const budget = pick(PROJECT_ALIASES.budget, t => t === 'number')
-  const spent = pick(PROJECT_ALIASES.spent, t => t === 'number')
-  const deadline = pick(PROJECT_ALIASES.deadline, t => t === 'date')
+  const builder = pick(PROJECT_ALIASES.builder)
+  const jobAccount = pick(PROJECT_ALIASES.jobAccount, p => p.type === 'checkbox')
+  const followUp = pick(PROJECT_ALIASES.followUp, p => ['checkbox', 'select', 'status'].includes(p.type))
+  const budget = pick(PROJECT_ALIASES.budget, p => p.type === 'number')
+  const spent = pick(PROJECT_ALIASES.spent, p => p.type === 'number')
+  const deadline = pick(PROJECT_ALIASES.deadline, p => p.type === 'date')
 
   const statusKind: 'status' | 'select' | undefined =
     statusName && props[statusName]?.type === 'status' ? 'status' : statusName ? 'select' : undefined
+  
+  const clientKind: 'relation' | 'text' | undefined = 
+    clientName && props[clientName]?.type === 'relation' && props[clientName]?.relation?.database_id === CLIENTS_DB_ID ? 'relation' : 'text';
 
   const keys: ProjectKeys = {
     title: title || Object.keys(props).find(k => props[k]?.type === 'title')!,
     status: statusName,
     statusKind,
-    client,
+    client: clientName,
+    clientKind,
     location,
+    builder,
     jobAccount,
     followUp,
     budget,
@@ -106,8 +134,8 @@ async function getProjectKeys(dbId: string): Promise<ProjectKeys> {
 }
 
 /** -------------------------------
- *  Property readers
- *  ------------------------------- */
+ * Property readers
+ * ------------------------------- */
 function readTitle(p: any, titleKey: string): string {
   const v = p?.[titleKey]?.title
   if (Array.isArray(v) && v.length) return v.map((t: any) => t.plain_text).join(' ')
@@ -158,8 +186,8 @@ async function queryAll(opts: any): Promise<any[]> {
 }
 
 /** -------------------------------
- *  Public dashboard functions
- *  ------------------------------- */
+ * Public dashboard functions
+ * ------------------------------- */
 
 /** 1) KPI: count “Post & Beam” */
 export async function countPostAndBeam(): Promise<number> {
@@ -193,37 +221,32 @@ export async function listBids(): Promise<Array<{ id: string; title: string; cli
   }
 
   const filter = orFilters.length ? { or: orFilters } : undefined
-  const res: any = await notion.databases.query({
+  const results = await queryAll({
     database_id: PROJECTS_DB_ID,
     ...(filter ? { filter } : {}),
-    page_size: 50,
   })
 
-  return res.results.map((r: any) => {
+  return Promise.all(results.map(async (r: any) => {
     const p = r.properties || {}
+    let client: string | undefined;
+    if (keys.client) {
+      if (keys.clientKind === 'relation' && p[keys.client]?.relation?.[0]?.id) {
+        client = await getPageTitle(p[keys.client].relation[0].id);
+      } else {
+        client = readTextish(p, keys.client);
+      }
+    }
+
     return {
       id: r.id,
       title: readTitle(p, keys.title),
-      client: readTextish(p, keys.client),
+      client,
       location: readTextish(p, keys.location),
       status: keys.status
         ? (keys.statusKind === 'status' ? p[keys.status]?.status?.name : p[keys.status]?.select?.name)
         : undefined,
     }
-  })
-}
-/** Generic 100-per-page paginator for Notion queries */
-async function listAll(
-  queryFn: (cursor?: string) => Promise<{ results: any[]; next_cursor?: string | null }>
-) {
-  const out: any[] = [];
-  let cursor: string | undefined;
-  do {
-    const page = await queryFn(cursor);
-    out.push(...page.results);
-    cursor = page.next_cursor ?? undefined;
-  } while (cursor);
-  return out;
+  }))
 }
 
 /** 3) Projects missing Job Account Setup checkbox */
@@ -232,24 +255,31 @@ export async function listJobAccountPending(): Promise<Array<{ id: string; title
   const keys = await getProjectKeys(PROJECTS_DB_ID)
   const filter: any = keys.jobAccount ? { property: keys.jobAccount, checkbox: { equals: false } } : undefined
 
-  const res: any = await notion.databases.query({
+  const results = await queryAll({
     database_id: PROJECTS_DB_ID,
     ...(filter ? { filter } : {}),
-    page_size: 100,
   })
 
-  return res.results.map((r: any) => {
+  return Promise.all(results.map(async (r: any) => {
     const p = r.properties || {}
+    let client: string | undefined;
+    if (keys.client) {
+      if (keys.clientKind === 'relation' && p[keys.client]?.relation?.[0]?.id) {
+        client = await getPageTitle(p[keys.client].relation[0].id);
+      } else {
+        client = readTextish(p, keys.client);
+      }
+    }
     return {
       id: r.id,
       title: readTitle(p, keys.title),
-      client: readTextish(p, keys.client),
+      client,
       location: readTextish(p, keys.location),
       status: keys.status
         ? (keys.statusKind === 'status' ? p[keys.status]?.status?.name : p[keys.status]?.select?.name)
         : undefined,
     }
-  })
+  }))
 }
 
 /** 4) Toggle Job Account checkbox */
@@ -364,61 +394,58 @@ export async function listProjectsBoard(input: { q?: string; status?: string }):
   const db: any = await notion.databases.retrieve({ database_id: PROJECTS_DB_ID })
   const props = db.properties || {}
 
-  // status options
   let statusOptions: string[] = []
   if (keys.status && keys.statusKind) {
-    const optArr =
-      keys.statusKind === 'status'
-        ? props[keys.status]?.status?.options
-        : props[keys.status]?.select?.options
+    const optArr = props[keys.status]?.[keys.statusKind]?.options
     statusOptions = Array.isArray(optArr) ? optArr.map((o: any) => o.name).filter(Boolean) : []
   }
 
-  // filters
   const andFilters: any[] = []
-  const orFilters: any[] = []
-
-  const q = (input.q || '').trim()
-  if (q) {
-    orFilters.push(
-      { property: keys.title, title: { contains: q } } as any,
-      ...(keys.client ? [{ property: keys.client, rich_text: { contains: q } } as any] : []),
-      ...(keys.location ? [{ property: keys.location, rich_text: { contains: q } } as any] : []),
-    )
-  }
   if (input.status && input.status !== 'All' && keys.status && keys.statusKind) {
     andFilters.push(selectFilter(keys.status, keys.statusKind, input.status))
   }
 
-  let filter: any = undefined
-  if (andFilters.length && orFilters.length) {
-    filter = { and: [...andFilters, { or: orFilters }] }
-  } else if (andFilters.length) {
-    filter = { and: andFilters }
-  } else if (orFilters.length) {
-    filter = { or: orFilters }
+  const q = (input.q || '').trim()
+  if (q) {
+    const orFilters: any[] = [{ property: keys.title, title: { contains: q } }]
+    if (keys.location) orFilters.push({ property: keys.location, rich_text: { contains: q } })
+    // Note: Client relation search is client-side for simplicity
+    andFilters.push({ or: orFilters })
   }
-
-  const res: any = await notion.databases.query({
+  
+  const results = await queryAll({
     database_id: PROJECTS_DB_ID,
-    ...(filter ? { filter } : {}),
-    page_size: 100,
+    ...(andFilters.length ? { filter: { and: andFilters } } : {}),
   })
 
-  const items = res.results.map((r: any) => {
+  const items = await Promise.all(results.map(async (r: any) => {
     const p = r.properties || {}
+    let client: string | undefined;
+    if (keys.client) {
+      if (keys.clientKind === 'relation' && p[keys.client]?.relation?.[0]?.id) {
+        client = await getPageTitle(p[keys.client].relation[0].id);
+      } else {
+        client = readTextish(p, keys.client);
+      }
+    }
     return {
       id: r.id,
       title: readTitle(p, keys.title),
-      status: keys.status
-        ? (keys.statusKind === 'status' ? p[keys.status]?.status?.name : p[keys.status]?.select?.name)
-        : undefined,
-      client: readTextish(p, keys.client),
+      status: readTextish(p, keys.status),
+      client,
       location: readTextish(p, keys.location),
     }
-  })
+  }))
 
-  return { items, statusOptions }
+  const filteredItems = q
+    ? items.filter(item => 
+        item.title.toLowerCase().includes(q.toLowerCase()) || 
+        item.location?.toLowerCase().includes(q.toLowerCase()) ||
+        item.client?.toLowerCase().includes(q.toLowerCase())
+      )
+    : items;
+
+  return { items: filteredItems, statusOptions }
 }
 
 /** 10) Full project detail with totals */
@@ -428,6 +455,7 @@ export async function getProjectFull(id: string): Promise<{
     title: string
     client?: string
     location?: string
+    builder?: string
     status?: string
     jobAccount?: boolean
     followUp?: boolean | string
@@ -449,158 +477,61 @@ export async function getProjectFull(id: string): Promise<{
   if (!PROJECTS_DB_ID) throw new Error('PROJECTS_DB_ID missing')
   const keys = await getProjectKeys(PROJECTS_DB_ID)
 
-  // Base project
   const page: any = await notion.pages.retrieve({ page_id: id })
   const p = page.properties || {}
+
+  let client: string | undefined;
+  if (keys.client) {
+    if (keys.clientKind === 'relation' && p[keys.client]?.relation?.[0]?.id) {
+      client = await getPageTitle(p[keys.client].relation[0].id);
+    } else {
+      client = readTextish(p, keys.client);
+    }
+  }
+
   const proj = {
     id,
     title: readTitle(p, keys.title),
-    client: readTextish(p, keys.client),
+    client,
     location: readTextish(p, keys.location),
-    status: keys.status
-      ? (keys.statusKind === 'status' ? p[keys.status]?.status?.name : p[keys.status]?.select?.name)
-      : undefined,
+    builder: readTextish(p, keys.builder),
+    status: readTextish(p, keys.status),
     jobAccount: readCheckbox(p, keys.jobAccount),
-    followUp: keys.followUp
-      ? (p[keys.followUp]?.type === 'checkbox'
-          ? !!p[keys.followUp]?.checkbox
-          : readTextish(p, keys.followUp))
-      : undefined,
+    followUp: keys.followUp ? (p[keys.followUp]?.type === 'checkbox' ? !!p[keys.followUp]?.checkbox : readTextish(p, keys.followUp)) : undefined,
     budget: readNumber(p, keys.budget),
     spent: readNumber(p, keys.spent),
     deadline: readTextish(p, keys.deadline),
   }
 
-  // Helper to pull related rows by relation to PROJECTS_DB_ID
   async function listRelated(dbId?: string) {
     if (!dbId) return []
     const db: any = await notion.databases.retrieve({ database_id: dbId })
     const props = db.properties || {}
-    const relKey = Object.keys(props).find(
-      k => props[k]?.type === 'relation' && props[k]?.relation?.database_id === PROJECTS_DB_ID
-    )
+    const relKey = Object.keys(props).find(k => props[k]?.type === 'relation' && props[k]?.relation?.database_id === PROJECTS_DB_ID)
     if (!relKey) return []
-    return await queryAll({
-      database_id: dbId,
-      filter: { property: relKey, relation: { contains: id } } as any,
-      page_size: 100,
-    })
+    return await queryAll({ database_id: dbId, filter: { property: relKey, relation: { contains: id } } as any })
   }
 
-  // Improvements
-  const impRows = await listRelated(IMPROVEMENTS_DB_ID)
-  let improvements = impRows.map((r: any) => {
-    const pr = r.properties || {}
-    const titleKey = Object.keys(pr).find(k => pr[k]?.type === 'title')!
-    const statusKey = Object.keys(pr).find(k => ['status', 'select'].includes(pr[k]?.type))
-    const statusKind: 'status' | 'select' | undefined =
-      statusKey && pr[statusKey]?.type === 'status' ? 'status' : statusKey ? 'select' : undefined
-    return {
-      id: r.id,
-      title: readTitle(pr, titleKey),
-      status: statusKey ? (statusKind === 'status' ? pr[statusKey]?.status?.name : pr[statusKey]?.select?.name) : undefined,
-    }
-  })
+  const [impRows, taskRows, expRows, timeRows, noteRows, docRows] = await Promise.all([
+    listRelated(IMPROVEMENTS_DB_ID),
+    listRelated(TASKS_DB_ID),
+    listRelated(EXPENSES_DB_ID),
+    listRelated(TIME_DB_ID),
+    listRelated(NOTES_DB_ID),
+    listRelated(DOCS_DB_ID),
+  ]);
 
-  // Tasks
-  const taskRows = await listRelated(TASKS_DB_ID)
-  const tasks = taskRows.map((r: any) => {
-    const pr = r.properties || {}
-    const titleKey = Object.keys(pr).find(k => pr[k]?.type === 'title')!
-    const statusKey = Object.keys(pr).find(k => ['status', 'select'].includes(pr[k]?.type))
-    const statusKind: 'status' | 'select' | undefined =
-      statusKey && pr[statusKey]?.type === 'status' ? 'status' : statusKey ? 'select' : undefined
-    const assigneeKey = Object.keys(pr).find(k => pr[k]?.type === 'people')
-    const dueKey = Object.keys(pr).find(k => pr[k]?.type === 'date' || /due/i.test(k))
-    const assignee =
-      assigneeKey && pr[assigneeKey]?.people?.[0]?.name
-        ? pr[assigneeKey].people[0].name
-        : assigneeKey && pr[assigneeKey]?.people?.[0]?.person?.email
-    return {
-      id: r.id,
-      title: readTitle(pr, titleKey),
-      status: statusKey ? (statusKind === 'status' ? pr[statusKey]?.status?.name : pr[statusKey]?.select?.name) : undefined,
-      assignee,
-      due: dueKey ? pr[dueKey]?.date?.start : undefined,
-    }
-  })
+  const improvements = impRows.map((r: any) => ({ id: r.id, title: readTitle(r.properties, Object.keys(r.properties).find(k => r.properties[k].type === 'title')!), status: readTextish(r.properties, Object.keys(r.properties).find(k => ['status', 'select'].includes(r.properties[k].type))) }));
+  const tasks = taskRows.map((r: any) => ({ id: r.id, title: readTitle(r.properties, Object.keys(r.properties).find(k => r.properties[k].type === 'title')!), status: readTextish(r.properties, Object.keys(r.properties).find(k => ['status', 'select'].includes(r.properties[k].type))), assignee: r.properties[Object.keys(r.properties).find(k => r.properties[k].type === 'people')]?.people?.[0]?.name, due: r.properties[Object.keys(r.properties).find(k => r.properties[k].type === 'date')]?.date?.start }));
+  const expenses = expRows.map((r: any) => ({ id: r.id, name: readTitle(r.properties, Object.keys(r.properties).find(k => r.properties[k].type === 'title')!), category: readTextish(r.properties, Object.keys(r.properties).find(k => r.properties[k].type === 'select')), value: readNumber(r.properties, Object.keys(r.properties).find(k => r.properties[k].type === 'number')) }));
+  const time = timeRows.map((r: any) => ({ id: r.id, name: readTitle(r.properties, Object.keys(r.properties).find(k => r.properties[k].type === 'title')!), person: r.properties[Object.keys(r.properties).find(k => r.properties[k].type === 'people')]?.people?.[0]?.name, date: r.properties[Object.keys(r.properties).find(k => r.properties[k].type === 'date')]?.date?.start, hours: readNumber(r.properties, Object.keys(r.properties).find(k => r.properties[k].type === 'number')) }));
+  const notes = noteRows.map((r: any) => ({ id: r.id, title: readTitle(r.properties, Object.keys(r.properties).find(k => r.properties[k].type === 'title')!), created: r.properties[Object.keys(r.properties).find(k => r.properties[k].type === 'created_time')]?.created_time }));
+  const docs = docRows.map((r: any) => ({ id: r.id, title: readTitle(r.properties, Object.keys(r.properties).find(k => r.properties[k].type === 'title')!), description: readTextish(r.properties, Object.keys(r.properties).find(k => r.properties[k].type === 'rich_text')) }));
 
-  // Expenses
-  const expRows = await listRelated(EXPENSES_DB_ID)
-  const expenses = expRows.map((r: any) => {
-    const pr = r.properties || {}
-    const nameKey = Object.keys(pr).find(k => pr[k]?.type === 'title')!
-    const catKey = Object.keys(pr).find(k => pr[k]?.type === 'select')
-    const valKey = Object.keys(pr).find(k => pr[k]?.type === 'number')
-    return {
-      id: r.id,
-      name: readTitle(pr, nameKey),
-      category: catKey ? pr[catKey]?.select?.name : undefined,
-      value: valKey ? pr[valKey]?.number : undefined,
-    }
-  })
-
-  // Time entries
-  const timeRows = await listRelated(TIME_DB_ID)
-  const time = timeRows.map((r: any) => {
-    const pr = r.properties || {}
-    const nameKey = Object.keys(pr).find(k => pr[k]?.type === 'title')!
-    const personKey = Object.keys(pr).find(k => pr[k]?.type === 'people')
-    const dateKey = Object.keys(pr).find(k => pr[k]?.type === 'date')
-    const hoursKey = Object.keys(pr).find(k => pr[k]?.type === 'number')
-    return {
-      id: r.id,
-      name: readTitle(pr, nameKey),
-      person:
-        personKey && pr[personKey]?.people?.[0]?.name
-          ? pr[personKey].people[0].name
-          : personKey && pr[personKey]?.people?.[0]?.person?.email,
-      date: dateKey ? pr[dateKey]?.date?.start : undefined,
-      hours: hoursKey ? pr[hoursKey]?.number : undefined,
-    }
-  })
-
-  // Notes
-  const noteRows = await listRelated(NOTES_DB_ID)
-  const notes = noteRows.map((r: any) => {
-    const pr = r.properties || {}
-    const titleKey = Object.keys(pr).find(k => pr[k]?.type === 'title')!
-    const createdKey = Object.keys(pr).find(k => pr[k]?.type === 'created_time')
-    return {
-      id: r.id,
-      title: readTitle(pr, titleKey),
-      created: createdKey ? pr[createdKey]?.created_time : undefined,
-    }
-  })
-
-  // Docs
-  const docRows = await listRelated(DOCS_DB_ID)
-  const docs = docRows.map((r: any) => {
-    const pr = r.properties || {}
-    const titleKey = Object.keys(pr).find(k => pr[k]?.type === 'title')!
-    const descKey = Object.keys(pr).find(k => pr[k]?.type === 'rich_text' || /description/i.test(k))
-    return {
-      id: r.id,
-      title: readTitle(pr, titleKey),
-      description: descKey ? readTextish(pr, descKey) : undefined,
-    }
-  })
-
-  // Totals
   const totalExpenses = expenses.reduce((s, e) => s + (e.value || 0), 0)
   const totalHours = time.reduce((s, t) => s + (t.hours || 0), 0)
-  const openTasks = tasks.filter(t => (t.status || '').toLowerCase() !== 'done').length
-  const openImprovements = improvements.filter(i => (i.status || '').toLowerCase() !== 'done').length
+  const openTasks = tasks.filter(t => t.status?.toLowerCase() !== 'done').length
+  const openImprovements = improvements.filter(i => i.status?.toLowerCase() !== 'done').length
 
-  return {
-    project: { ...proj, totalExpenses, totalHours, openTasks, openImprovements },
-    improvements,
-    tasks,
-    expenses,
-    time,
-    notes,
-    docs,
-  }
+  return { project: { ...proj, totalExpenses, totalHours, openTasks, openImprovements }, improvements, tasks, expenses, time, notes, docs }
 }
-
-
