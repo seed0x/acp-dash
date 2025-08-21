@@ -32,12 +32,14 @@ type BoardItem = {
   status?: string; 
   client?: string; 
   location?: string; 
-  builder?: string; 
+  builder?: string;
+  subdivision?: string;
 };
 
 type ProjectOption = { 
   id: string; 
-  title: string; 
+  title: string;
+  subdivision?: string;
 };
 
 type Issue = {
@@ -162,6 +164,12 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: {
   const [photoDescription, setPhotoDescription] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   
+  // Searchable project inputs
+  const [photoProjectSearch, setPhotoProjectSearch] = useState('');
+  const [issueProjectSearch, setIssueProjectSearch] = useState('');
+  const [showPhotoProjectDropdown, setShowPhotoProjectDropdown] = useState(false);
+  const [showIssueProjectDropdown, setShowIssueProjectDropdown] = useState(false);
+  
   // Bidding status tracking
   const [biddingStatuses, setBiddingStatuses] = useState<Record<string, string>>({});
   const [showBiddingPanel, setShowBiddingPanel] = useState(false);
@@ -169,6 +177,43 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: {
   
   // Show issues panel
   const [showIssuesPanel, setShowIssuesPanel] = useState(false);
+
+  // Format project display with subdivision
+  const formatProjectDisplay = (project: ProjectOption) => {
+    if (project.subdivision) {
+      return `${project.title} - ${project.subdivision}`;
+    }
+    return project.title;
+  };
+
+  // Filter projects for searchable dropdowns
+  const getFilteredProjects = (searchTerm: string) => {
+    if (!searchTerm) return projects;
+    const term = searchTerm.toLowerCase();
+    return projects.filter(p => {
+      const title = p.title.toLowerCase();
+      const subdivision = (p.subdivision || '').toLowerCase();
+      return title.includes(term) || subdivision.includes(term);
+    });
+  };
+
+  const photoFilteredProjects = getFilteredProjects(photoProjectSearch);
+  const issueFilteredProjects = getFilteredProjects(issueProjectSearch);
+
+  // Handle project selection from dropdown
+  const handleProjectSelect = (projectId: string, type: 'photo' | 'issue') => {
+    const project = projects.find(p => p.id === projectId);
+    if (project) {
+      setActionProjectId(projectId);
+      if (type === 'photo') {
+        setPhotoProjectSearch(formatProjectDisplay(project));
+        setShowPhotoProjectDropdown(false);
+      } else {
+        setIssueProjectSearch(formatProjectDisplay(project));
+        setShowIssueProjectDropdown(false);
+      }
+    }
+  };
 
   useEffect(() => {
     const t = setTimeout(() => setQuery(searchInput.trim()), 400);
@@ -182,6 +227,19 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: {
     }
   }, [successMessage]);
 
+  // Close dropdowns when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('.project-search-dropdown')) {
+        setShowPhotoProjectDropdown(false);
+        setShowIssueProjectDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   const loadData = async () => {
     try {
       setError(null);
@@ -193,10 +251,20 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: {
       ]);
       setKpis(summary.kpis);
       setPendingAcct(acct.rows);
-      setProjects(projectsList.rows);
+      
+      // Add subdivision data to projects (you'll need to ensure this comes from your API)
+      const projectsWithSubdivision = projectsList.rows.map(p => ({
+        ...p,
+        subdivision: p.subdivision || '' // This should come from your Notion data
+      }));
+      setProjects(projectsWithSubdivision);
       setIssues(improvementsData.rows);
-      if (projectsList.rows.length > 0 && !actionProjectId) {
-        setActionProjectId(projectsList.rows[0].id);
+      
+      if (projectsWithSubdivision.length > 0 && !actionProjectId) {
+        const firstProject = projectsWithSubdivision[0];
+        setActionProjectId(firstProject.id);
+        setPhotoProjectSearch(formatProjectDisplay(firstProject));
+        setIssueProjectSearch(formatProjectDisplay(firstProject));
       }
     } catch (e: any) {
       setError(`Failed to load data: ${e.message}`);
@@ -415,16 +483,35 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: {
               <h3 className="font-semibold text-white">Quick Photo</h3>
             </div>
             <div className="space-y-3">
-              <select 
-                value={actionProjectId} 
-                onChange={e => setActionProjectId(e.target.value)} 
-                className="w-full px-3 py-2.5 bg-slate-700 border border-slate-600 rounded-lg text-white"
-              >
-                <option value="">Select lot...</option>
-                {projects.map(p => (
-                  <option key={p.id} value={p.id}>{p.title}</option>
-                ))}
-              </select>
+              <div className="relative project-search-dropdown">
+                <input
+                  type="text"
+                  value={photoProjectSearch}
+                  onChange={(e) => {
+                    setPhotoProjectSearch(e.target.value);
+                    setShowPhotoProjectDropdown(true);
+                  }}
+                  onFocus={() => setShowPhotoProjectDropdown(true)}
+                  placeholder="Search lot name or subdivision..."
+                  className="w-full px-3 py-2.5 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400"
+                />
+                {showPhotoProjectDropdown && photoFilteredProjects.length > 0 && (
+                  <div className="absolute z-10 w-full mt-1 bg-slate-800 border border-slate-600 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                    {photoFilteredProjects.map(p => (
+                      <button
+                        key={p.id}
+                        onClick={() => handleProjectSelect(p.id, 'photo')}
+                        className="w-full px-3 py-2 text-left text-white hover:bg-slate-700 transition-colors"
+                      >
+                        <div className="font-medium">{p.title}</div>
+                        {p.subdivision && (
+                          <div className="text-xs text-slate-400">{p.subdivision}</div>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               <input 
                 id="photo-file-input-mobile"
                 type="file" 
@@ -432,6 +519,12 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: {
                 capture="environment"
                 onChange={e => setPhotoFile(e.target.files?.[0] || null)}
                 className="w-full px-3 py-2.5 bg-slate-700 border border-slate-600 rounded-lg text-white file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:bg-blue-600 file:text-white"
+              />
+              <input 
+                value={photoDescription} 
+                onChange={e => setPhotoDescription(e.target.value)} 
+                placeholder="Description (optional)"
+                className="w-full px-3 py-2.5 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400"
               />
               <button 
                 onClick={() => handleQuickAction('photo')} 
@@ -450,6 +543,35 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: {
               <h3 className="font-semibold text-white">Report Issue</h3>
             </div>
             <div className="space-y-3">
+              <div className="relative project-search-dropdown">
+                <input
+                  type="text"
+                  value={issueProjectSearch}
+                  onChange={(e) => {
+                    setIssueProjectSearch(e.target.value);
+                    setShowIssueProjectDropdown(true);
+                  }}
+                  onFocus={() => setShowIssueProjectDropdown(true)}
+                  placeholder="Search lot name or subdivision..."
+                  className="w-full px-3 py-2.5 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400"
+                />
+                {showIssueProjectDropdown && issueFilteredProjects.length > 0 && (
+                  <div className="absolute z-10 w-full mt-1 bg-slate-800 border border-slate-600 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                    {issueFilteredProjects.map(p => (
+                      <button
+                        key={p.id}
+                        onClick={() => handleProjectSelect(p.id, 'issue')}
+                        className="w-full px-3 py-2 text-left text-white hover:bg-slate-700 transition-colors"
+                      >
+                        <div className="font-medium">{p.title}</div>
+                        {p.subdivision && (
+                          <div className="text-xs text-slate-400">{p.subdivision}</div>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               <input 
                 value={upgradeTitle} 
                 onChange={e => setUpgradeTitle(e.target.value)} 
@@ -507,7 +629,7 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: {
                 <input
                   value={searchInput}
                   onChange={e => setSearchInput(e.target.value)}
-                  placeholder="Search projects, clients, builders, locations..."
+                  placeholder="Search lots, subdivisions, clients, builders..."
                   className="w-full pl-12 pr-4 py-4 bg-transparent text-white placeholder-slate-400 focus:outline-none"
                 />
                 {searchInput && (
@@ -740,22 +862,47 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: {
                 <Camera className="h-5 w-5 text-blue-400" />
                 Quick Actions
               </h3>
-              <select 
-                value={actionProjectId} 
-                onChange={e => setActionProjectId(e.target.value)} 
-                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white"
-              >
-                <option value="">Select project...</option>
-                {projects.map(p => (
-                  <option key={p.id} value={p.id}>{p.title}</option>
-                ))}
-              </select>
+              <div className="relative project-search-dropdown">
+                <input
+                  type="text"
+                  value={photoProjectSearch}
+                  onChange={(e) => {
+                    setPhotoProjectSearch(e.target.value);
+                    setShowPhotoProjectDropdown(true);
+                  }}
+                  onFocus={() => setShowPhotoProjectDropdown(true)}
+                  placeholder="Search lot or subdivision..."
+                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-400"
+                />
+                {showPhotoProjectDropdown && photoFilteredProjects.length > 0 && (
+                  <div className="absolute z-10 w-full mt-1 bg-slate-900 border border-slate-700 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                    {photoFilteredProjects.map(p => (
+                      <button
+                        key={p.id}
+                        onClick={() => handleProjectSelect(p.id, 'photo')}
+                        className="w-full px-3 py-2 text-left text-white hover:bg-slate-800 transition-colors border-b border-slate-700 last:border-0"
+                      >
+                        <div className="font-medium">{p.title}</div>
+                        {p.subdivision && (
+                          <div className="text-xs text-slate-400">{p.subdivision}</div>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               <input 
                 id="photo-file-input"
                 type="file" 
                 accept="image/*" 
                 onChange={e => setPhotoFile(e.target.files?.[0] || null)}
                 className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:bg-blue-600 file:text-white"
+              />
+              <input 
+                value={photoDescription} 
+                onChange={e => setPhotoDescription(e.target.value)} 
+                placeholder="Photo description (optional)"
+                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-400"
               />
               <button 
                 onClick={() => handleQuickAction('photo')} 
@@ -764,19 +911,52 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: {
               >
                 Upload Photo
               </button>
-              <input 
-                value={upgradeTitle} 
-                onChange={e => setUpgradeTitle(e.target.value)} 
-                placeholder="Issue description..."
-                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-400"
-              />
-              <button 
-                onClick={() => handleQuickAction('upgrade')} 
-                disabled={isSubmitting || !upgradeTitle.trim() || !actionProjectId}
-                className="w-full bg-orange-600 hover:bg-orange-700 disabled:bg-slate-600 text-white py-2 rounded-lg font-medium"
-              >
-                Add Issue
-              </button>
+              
+              <div className="border-t border-slate-700 pt-4">
+                <h4 className="text-sm font-medium text-slate-400 mb-2">Report Issue</h4>
+                <div className="relative project-search-dropdown">
+                  <input
+                    type="text"
+                    value={issueProjectSearch}
+                    onChange={(e) => {
+                      setIssueProjectSearch(e.target.value);
+                      setShowIssueProjectDropdown(true);
+                    }}
+                    onFocus={() => setShowIssueProjectDropdown(true)}
+                    placeholder="Search lot or subdivision..."
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-400"
+                  />
+                  {showIssueProjectDropdown && issueFilteredProjects.length > 0 && (
+                    <div className="absolute z-10 w-full mt-1 bg-slate-900 border border-slate-700 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                      {issueFilteredProjects.map(p => (
+                        <button
+                          key={p.id}
+                          onClick={() => handleProjectSelect(p.id, 'issue')}
+                          className="w-full px-3 py-2 text-left text-white hover:bg-slate-800 transition-colors border-b border-slate-700 last:border-0"
+                        >
+                          <div className="font-medium">{p.title}</div>
+                          {p.subdivision && (
+                            <div className="text-xs text-slate-400">{p.subdivision}</div>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <input 
+                  value={upgradeTitle} 
+                  onChange={e => setUpgradeTitle(e.target.value)} 
+                  placeholder="Issue description..."
+                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-400 mt-2"
+                />
+                <button 
+                  onClick={() => handleQuickAction('upgrade')} 
+                  disabled={isSubmitting || !upgradeTitle.trim() || !actionProjectId}
+                  className="w-full bg-orange-600 hover:bg-orange-700 disabled:bg-slate-600 text-white py-2 rounded-lg font-medium mt-2"
+                >
+                  Add Issue
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -882,6 +1062,9 @@ const ProjectCard = ({ project, phase, biddingStatus, onProjectClick, onBiddingS
             onClick={() => onProjectClick(project.id)}
           >
             {project.title}
+            {project.subdivision && (
+              <span className="text-sm text-slate-400 font-normal ml-2">• {project.subdivision}</span>
+            )}
           </h3>
           <div className="flex items-center gap-2 mb-2">
             <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-medium ${phase.bgColor} ${phase.borderColor} border`}>

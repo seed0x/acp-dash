@@ -266,8 +266,8 @@ export async function toggleJobAccount(id: string, value: boolean) {
   }
 }
 
-// List all projects for dropdowns
-export async function listProjectOptions(): Promise<Array<{ id: string; title: string }>> {
+// List all projects for dropdowns with subdivision
+export async function listProjectOptions(): Promise<Array<{ id: string; title: string; subdivision?: string }>> {
   try {
     const results = await queryAll({ 
       database_id: PROJECTS_DB_ID, 
@@ -277,7 +277,8 @@ export async function listProjectOptions(): Promise<Array<{ id: string; title: s
     
     const options = results.map((r: any) => ({ 
       id: r.id, 
-      title: readTitle(r.properties, 'Project') 
+      title: readTitle(r.properties, 'Project'),
+      subdivision: readTextish(r.properties, 'Sub-Division') || readTextish(r.properties, 'Subdivision')
     }));
     
     return options;
@@ -294,12 +295,13 @@ export async function listProjectsBoard(input: { q?: string; status?: string }):
     title: string; 
     status?: string; 
     client?: string; 
-    builder?: string; // Added builder field
+    builder?: string;
     location?: string; 
+    subdivision?: string; // Added subdivision
     deadline?: string;
     budget?: string;
     budgetSpent?: number;
-    biddingStatus?: string; // For tracking bid progress
+    biddingStatus?: string;
   }>
   statusOptions: string[]
 }> {
@@ -322,8 +324,9 @@ export async function listProjectsBoard(input: { q?: string; status?: string }):
         title: readTitle(props, 'Project'),
         status: readTextish(props, 'Status'),
         client: readTextish(props, 'Client'),
-        builder: readTextish(props, 'Builder'), // Include builder
+        builder: readTextish(props, 'Builder'),
         location: readTextish(props, 'Location'),
+        subdivision: readTextish(props, 'Sub-Division') || readTextish(props, 'Subdivision'), // Include subdivision
         deadline: readTextish(props, 'Deadline'),
         budget: readTextish(props, 'Budget'),
         budgetSpent: readTextish(props, 'Budget spent') as number,
@@ -339,7 +342,7 @@ export async function listProjectsBoard(input: { q?: string; status?: string }):
     if (input.q) {
       const query = input.q.toLowerCase();
       items = items.filter(item =>
-        [item.title, item.client, item.builder, item.location].some(v => 
+        [item.title, item.client, item.builder, item.location, item.subdivision].some(v => 
           (v || '').toLowerCase().includes(query)
         )
       );

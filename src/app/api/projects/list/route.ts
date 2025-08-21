@@ -4,6 +4,7 @@ import { listProjectOptions } from '@/lib/notion-dashboard'
 
 export async function GET() {
   try {
+    // This will now include subdivision data from the updated Notion library
     const rows = await listProjectOptions()
     return NextResponse.json({ rows })
   } catch (e: any) {

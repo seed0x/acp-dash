@@ -8,6 +8,7 @@ export async function GET(req: Request) {
     const q = (url.searchParams.get('q') || '').trim();
     const status = url.searchParams.get('status') || 'All';
 
+    // This will now include subdivision data and search through it
     const data = await listProjectsBoard({ q, status });
     return NextResponse.json(data);
   } catch (e: any) {
