@@ -218,6 +218,181 @@ export async function listImprovements(openOnly?: boolean): Promise<Array<{
   }
 }
 
+// Enhanced task listing with search and filtering capabilities
+export async function listTasks(filters?: {
+  openOnly?: boolean;
+  search?: string;
+  status?: string[];
+  priority?: string[];
+  assignee?: string;
+  projectId?: string;
+}): Promise<Array<{ 
+  id: string; 
+  title: string; 
+  description?: string;
+  status: string; 
+  priority?: string;
+  assignee?: string;
+  dueDate?: string;
+  projectId?: string;
+  projectName?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  completed?: boolean;
+}>> {
+  try {
+    const notionFilters: any[] = [];
+    
+    // Filter by open status if requested
+    if (filters?.openOnly) {
+      notionFilters.push({
+        or: [
+          { property: 'Status', status: { does_not_equal: 'Done' } },
+          { property: 'Status', status: { does_not_equal: 'Complete' } },
+          { property: 'Status', status: { is_empty: true } }
+        ]
+      });
+    }
+
+    // Filter by specific statuses
+    if (filters?.status && filters.status.length > 0) {
+      notionFilters.push({
+        or: filters.status.map(status => ({
+          property: 'Status', status: { equals: status }
+        }))
+      });
+    }
+
+    // Filter by priority
+    if (filters?.priority && filters.priority.length > 0) {
+      notionFilters.push({
+        or: filters.priority.map(priority => ({
+          property: 'Priority', select: { equals: priority }
+        }))
+      });
+    }
+
+    // Filter by assignee
+    if (filters?.assignee) {
+      notionFilters.push({
+        property: 'Assignee', rich_text: { contains: filters.assignee }
+      });
+    }
+
+    // Filter by project
+    if (filters?.projectId) {
+      notionFilters.push({
+        property: 'Projects', relation: { contains: filters.projectId }
+      });
+    }
+
+    const results = await queryAll({
+      database_id: IMPROVEMENTS_DB_ID,
+      ...(notionFilters.length > 0 && { filter: { and: notionFilters } }),
+      sorts: [
+        { property: 'Status', direction: 'ascending' },
+        { timestamp: 'created_time', direction: 'descending' }
+      ]
+    });
+
+    let tasks = await Promise.all(results.map(async (r: any) => {
+      const props = r.properties || {};
+      const projectRelations = readRelation(props, 'Projects');
+      let projectName = '';
+      let projectId = '';
+      
+      if (projectRelations.length > 0) {
+        projectId = projectRelations[0].id;
+        projectName = await getPageTitle(projectId);
+      }
+
+      const status = readTextish(props, 'Status') || 'Open';
+      
+      return {
+        id: r.id,
+        title: readTitle(props, 'Improvement'),
+        description: readTextish(props, 'Description'),
+        status,
+        priority: readTextish(props, 'Priority'),
+        assignee: readTextish(props, 'Assignee'),
+        dueDate: readTextish(props, 'Due Date') || readTextish(props, 'DueDate'),
+        projectId,
+        projectName,
+        createdAt: r.created_time,
+        updatedAt: r.last_edited_time,
+        completed: status === 'Done' || status === 'Complete'
+      };
+    }));
+
+    // Apply client-side search filter if provided
+    if (filters?.search && filters.search.trim()) {
+      const searchTerm = filters.search.toLowerCase().trim();
+      tasks = tasks.filter(task => 
+        task.title.toLowerCase().includes(searchTerm) ||
+        task.description?.toLowerCase().includes(searchTerm) ||
+        task.projectName?.toLowerCase().includes(searchTerm) ||
+        task.assignee?.toLowerCase().includes(searchTerm)
+      );
+    }
+    
+    return tasks;
+  } catch (e) {
+    console.error('Error listing tasks:', e);
+    return [];
+  }
+}
+
+// Get task details by ID
+export async function getTaskDetails(taskId: string): Promise<{
+  id: string;
+  title: string;
+  description?: string;
+  status: string;
+  priority?: string;
+  assignee?: string;
+  dueDate?: string;
+  projectId?: string;
+  projectName?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  completed?: boolean;
+} | null> {
+  try {
+    const page = await notion.pages.retrieve({ page_id: taskId });
+    if (!('properties' in page)) return null;
+    
+    const props = page.properties;
+    const projectRelations = readRelation(props, 'Projects');
+    let projectName = '';
+    let projectId = '';
+    
+    if (projectRelations.length > 0) {
+      projectId = projectRelations[0].id;
+      projectName = await getPageTitle(projectId);
+    }
+
+    const status = readTextish(props, 'Status') || 'Open';
+    
+    return {
+      id: page.id,
+      title: readTitle(props, 'Improvement'),
+      description: readTextish(props, 'Description'),
+      status,
+      priority: readTextish(props, 'Priority'),
+      assignee: readTextish(props, 'Assignee'),
+      dueDate: readTextish(props, 'Due Date') || readTextish(props, 'DueDate'),
+      projectId,
+      projectName,
+      createdAt: page.created_time,
+      updatedAt: page.last_edited_time,
+      completed: status === 'Done' || status === 'Complete'
+    };
+  } catch (e) {
+    console.error('Error getting task details:', e);
+    return null;
+  }
+}
+
 // Create new improvement
 export async function createImprovement(input: { 
   projectId: string; 
@@ -238,6 +413,137 @@ export async function createImprovement(input: {
     console.error('Error creating improvement:', e);
     throw new Error(`Failed to create improvement: ${e instanceof Error ? e.message : 'Unknown error'}`);
   }
+}
+
+// Enhanced task creation with additional fields
+export async function createTask(input: {
+  projectId: string;
+  title: string;
+  description?: string;
+  priority?: string;
+  assignee?: string;
+  dueDate?: string;
+  status?: string;
+}): Promise<string> {
+  try {
+    const properties: any = {
+      'Improvement': { title: [{ text: { content: input.title } }] },
+      'Projects': { relation: [{ id: input.projectId }] },
+      'Status': { status: { name: input.status || 'Open' } }
+    };
+
+    if (input.description) {
+      properties['Description'] = { rich_text: [{ text: { content: input.description } }] };
+    }
+    if (input.priority) {
+      properties['Priority'] = { select: { name: input.priority } };
+    }
+    if (input.assignee) {
+      properties['Assignee'] = { rich_text: [{ text: { content: input.assignee } }] };
+    }
+    if (input.dueDate) {
+      properties['Due Date'] = { date: { start: input.dueDate } };
+    }
+
+    const response = await notion.pages.create({
+      parent: { database_id: IMPROVEMENTS_DB_ID },
+      properties
+    } as any);
+
+    return response.id;
+  } catch (e) {
+    console.error('Error creating task:', e);
+    throw new Error(`Failed to create task: ${e instanceof Error ? e.message : 'Unknown error'}`);
+  }
+}
+
+// Update task with enhanced fields
+export async function updateTask(taskId: string, updates: {
+  title?: string;
+  description?: string;
+  status?: string;
+  priority?: string;
+  assignee?: string;
+  dueDate?: string;
+}): Promise<void> {
+  try {
+    const properties: any = {};
+
+    if (updates.title) {
+      properties['Improvement'] = { title: [{ text: { content: updates.title } }] };
+    }
+    if (updates.description !== undefined) {
+      properties['Description'] = updates.description 
+        ? { rich_text: [{ text: { content: updates.description } }] }
+        : { rich_text: [] };
+    }
+    if (updates.status) {
+      properties['Status'] = { status: { name: updates.status } };
+    }
+    if (updates.priority !== undefined) {
+      properties['Priority'] = updates.priority 
+        ? { select: { name: updates.priority } }
+        : { select: null };
+    }
+    if (updates.assignee !== undefined) {
+      properties['Assignee'] = updates.assignee 
+        ? { rich_text: [{ text: { content: updates.assignee } }] }
+        : { rich_text: [] };
+    }
+    if (updates.dueDate !== undefined) {
+      properties['Due Date'] = updates.dueDate 
+        ? { date: { start: updates.dueDate } }
+        : { date: null };
+    }
+
+    await notion.pages.update({
+      page_id: taskId,
+      properties
+    } as any);
+  } catch (e) {
+    console.error('Error updating task:', e);
+    throw new Error(`Failed to update task: ${e instanceof Error ? e.message : 'Unknown error'}`);
+  }
+}
+
+// Bulk update task statuses
+export async function bulkUpdateTaskStatus(taskIds: string[], status: string): Promise<void> {
+  try {
+    await Promise.all(taskIds.map(id => 
+      notion.pages.update({
+        page_id: id,
+        properties: {
+          'Status': { status: { name: status } }
+        }
+      } as any)
+    ));
+  } catch (e) {
+    console.error('Error bulk updating task status:', e);
+    throw new Error(`Failed to bulk update tasks: ${e instanceof Error ? e.message : 'Unknown error'}`);
+  }
+}
+
+// Note: Comments would typically be stored in a separate Notion database
+// For now, we'll simulate comments as a simple structure
+// In a real implementation, you'd want a dedicated COMMENTS_DB_ID
+
+// Mock comment functions (replace with actual Notion implementation)
+export async function getTaskComments(taskId: string): Promise<Array<{
+  id: string;
+  taskId: string;
+  content: string;
+  author: string;
+  createdAt: string;
+}>> {
+  // This would query a comments database in Notion
+  // For now, return empty array as comments aren't implemented in Notion yet
+  return [];
+}
+
+export async function addTaskComment(taskId: string, content: string, author: string): Promise<string> {
+  // This would create a new comment in Notion
+  // For now, return a mock ID
+  return `comment_${Date.now()}`;
 }
 
 // Update improvement status
