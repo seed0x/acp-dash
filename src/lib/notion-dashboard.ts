@@ -212,6 +212,19 @@ export async function listBids(): Promise<Array<{ id: string; title: string; cli
     }
   })
 }
+/** Generic 100-per-page paginator for Notion queries */
+async function listAll(
+  queryFn: (cursor?: string) => Promise<{ results: any[]; next_cursor?: string | null }>
+) {
+  const out: any[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await queryFn(cursor);
+    out.push(...page.results);
+    cursor = page.next_cursor ?? undefined;
+  } while (cursor);
+  return out;
+}
 
 /** 3) Projects missing Job Account Setup checkbox */
 export async function listJobAccountPending(): Promise<Array<{ id: string; title: string; client?: string; location?: string; status?: string }>> {
@@ -589,4 +602,5 @@ export async function getProjectFull(id: string): Promise<{
     docs,
   }
 }
+
 
