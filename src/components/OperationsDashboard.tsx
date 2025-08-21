@@ -2,12 +2,12 @@
 
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { Plus, Camera, CheckCircle2, Search } from 'lucide-react';
+import { Plus, Camera, CheckCircle2, Search, User, Building, MapPin } from 'lucide-react';
 import ProjectDetailPanel from './ProjectDetailPanel';
 
 // Type definitions
 type KPI = { postAndBeam: number; activeBids: number; jobAccountsPending: number; openProblems: number };
-type ProjectRow = { id: string; title: string; client?: string; location?: string; status?: string; builder?: string; };
+type ProjectRow = { id: string; title: string; client?: string; };
 type BoardItem = { id: string; title: string; status?: string; client?: string; location?: string; builder?: string; };
 type ProjectOption = { id:string; title: string };
 
@@ -71,7 +71,7 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: { initialKpis: 
       const qs = new URLSearchParams({ q: query, status });
       const data = await fetchJSON<{ items: BoardItem[]; statusOptions: string[] }>(`/api/projects/board?${qs}`);
       setBoardItems(data.items);
-      setStatusOptions(['All', ...data.statusOptions.filter(s => s && s !== 'All')]);
+      setStatusOptions(['All', ...data.statusOptions]);
     } catch (e: any) { setError(e.message) } 
     finally { setBoardLoading(false) }
   }, [query, status]);
@@ -85,31 +85,24 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: { initialKpis: 
     return acc;
   }, {} as Record<string, BoardItem[]>), [boardItems]);
 
-  const handlePhotoSubmit = async () => {
-    if (!actionProjectId || !photoFile) return;
+  const handleActionSubmit = async (type: 'photo' | 'upgrade') => {
+    if (!actionProjectId) return;
     setIsSubmitting(true);
     setError(null);
     try {
-      const formData = new FormData();
-      formData.append('file', photoFile);
-      formData.append('projectId', actionProjectId);
-      formData.append('description', photoDescription);
-      await fetch('/api/photos', { method: 'POST', body: formData });
-      setPhotoFile(null);
-      setPhotoDescription('');
+      if (type === 'photo' && photoFile) {
+        const formData = new FormData();
+        formData.append('file', photoFile);
+        formData.append('projectId', actionProjectId);
+        formData.append('description', photoDescription);
+        await fetch('/api/photos', { method: 'POST', body: formData });
+        setPhotoFile(null); setPhotoDescription('');
+      } else if (type === 'upgrade' && upgradeTitle) {
+        await fetch('/api/improvements', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId: actionProjectId, title: upgradeTitle }) });
+        setUpgradeTitle('');
+      }
+      await loadData(); // Refresh KPIs on success
     } catch (e: any) { setError(e.message) }
-    finally { setIsSubmitting(false) }
-  };
-  
-  const handleUpgradeSubmit = async () => {
-    if (!actionProjectId || !upgradeTitle) return;
-    setIsSubmitting(true);
-    setError(null);
-    try {
-      await fetch('/api/improvements', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId: actionProjectId, title: upgradeTitle }) });
-      setUpgradeTitle('');
-      await loadData();
-    } catch (e:any) { setError(e.message) }
     finally { setIsSubmitting(false) }
   };
 
@@ -123,7 +116,6 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: { initialKpis: 
         {error && <div className="card p-3 bg-destructive text-destructive-foreground mb-4">{error}</div>}
         
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left Column: Projects */}
           <div className="lg:col-span-2 flex flex-col gap-4">
             <div className="flex flex-col md:flex-row gap-2">
               <div className="relative flex-grow">
@@ -134,11 +126,11 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: { initialKpis: 
             </div>
             <div className="flex-grow h-[calc(100vh-12rem)] overflow-y-auto pr-2">
               {boardLoading ? <div className="card h-full w-full skeleton" /> :
-                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
                   {Object.entries(grouped).map(([col, rows]) => (
-                    <div key={col} className="space-y-3">
+                    <div key={col} className="space-y-4">
                       <h3 className="font-semibold px-1">{col} <span className="text-sm text-muted-foreground">({rows.length})</span></h3>
-                      <div className="space-y-3">
+                      <div className="space-y-4">
                         {rows.map(r => <ProjectCard key={r.id} project={r} onClick={() => handleViewProject(r.id)} />)}
                       </div>
                     </div>
@@ -148,7 +140,6 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: { initialKpis: 
             </div>
           </div>
           
-          {/* Right Column: Actions */}
           <div className="space-y-6">
             <ActionCard title="Add Photo" icon={Camera}>
               <div className="space-y-3">
@@ -157,7 +148,7 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: { initialKpis: 
                 </select>
                 <input type="file" accept="image/*" onChange={e => setPhotoFile(e.target.files?.[0] || null)} className="input"/>
                 <input value={photoDescription} onChange={e => setPhotoDescription(e.target.value)} placeholder="Photo description..." className="input"/>
-                <button onClick={handlePhotoSubmit} disabled={isSubmitting || !photoFile} className="w-full btn btn-primary">Upload Photo</button>
+                <button onClick={() => handleActionSubmit('photo')} disabled={isSubmitting || !photoFile} className="w-full btn btn-primary">Upload Photo</button>
               </div>
             </ActionCard>
 
@@ -167,7 +158,7 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: { initialKpis: 
                     {projects.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
                 </select>
                 <input value={upgradeTitle} onChange={e => setUpgradeTitle(e.target.value)} placeholder="Upgrade description..." className="input"/>
-                <button onClick={handleUpgradeSubmit} disabled={isSubmitting || !upgradeTitle} className="w-full btn btn-secondary">Add Upgrade</button>
+                <button onClick={() => handleActionSubmit('upgrade')} disabled={isSubmitting || !upgradeTitle} className="w-full btn btn-secondary">Add Upgrade</button>
               </div>
             </ActionCard>
 
@@ -202,12 +193,12 @@ const ActionCard = ({ icon: Icon, title, children }: { icon: React.ElementType, 
 );
 
 const ProjectCard = ({ project, onClick }: { project: BoardItem, onClick: () => void }) => (
-  <div onClick={onClick} className="card p-3 space-y-2 cursor-pointer transition-all hover:border-primary/80 hover:shadow-lg">
-    <p className="font-semibold truncate">{project.title}</p>
-    <div className="text-xs text-muted-foreground space-y-1">
-      {project.client && <p className="truncate">Client: {project.client}</p>}
-      {project.builder && <p className="truncate">Builder: {project.builder}</p>}
-      {project.location && <p className="truncate text-blue-400">{project.location}</p>}
+  <div onClick={onClick} className="card p-4 space-y-3 cursor-pointer transition-transform hover:scale-105 hover:shadow-lg">
+    <p className="font-bold truncate">{project.title}</p>
+    <div className="text-sm text-muted-foreground space-y-2">
+      {project.client && <div className="flex items-center gap-2"><User className="h-4 w-4" /><p className="truncate">{project.client}</p></div>}
+      {project.builder && <div className="flex items-center gap-2"><Building className="h-4 w-4" /><p className="truncate">{project.builder}</p></div>}
+      {project.location && <div className="flex items-center gap-2"><MapPin className="h-4 w-4 text-blue-400" /><p className="truncate text-blue-400">{project.location}</p></div>}
     </div>
   </div>
 );
