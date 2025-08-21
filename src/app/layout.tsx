@@ -13,13 +13,13 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
-  themeColor: '#0B1120',
+  themeColor: 'hsl(222 47% 11%)',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className="h-full">
-      <body className={`${inter.className} min-h-screen bg-[#0B1120] text-white`}>
+      <body className={`${inter.className} min-h-screen bg-background text-foreground`}>
         <Header />
         <main>{children}</main>
       </body>

@@ -2,62 +2,52 @@
 @tailwind components;
 @tailwind utilities;
 
-/* --- App theme + helpers --- */
 :root {
-  --bg: #0B1120;
-  --surface: rgba(255,255,255,0.06);
-  --surface-2: rgba(255,255,255,0.08);
-  --border: rgba(255,255,255,0.10);
-  --muted: #a3a3a3;
+  --background: 222 47% 11%;
+  --foreground: 210 40% 98%;
+  --card: 222 47% 13%;
+  --card-foreground: 210 40% 98%;
+  --popover: 222 47% 13%;
+  --popover-foreground: 210 40% 98%;
+  --primary: 210 40% 98%;
+  --primary-foreground: 222 47% 11%;
+  --secondary: 217 33% 17%;
+  --secondary-foreground: 210 40% 98%;
+  --muted: 217 33% 27%;
+  --muted-foreground: 215 20% 65%;
+  --accent: 217 33% 17%;
+  --accent-foreground: 210 40% 98%;
+  --destructive: 0 63% 31%;
+  --destructive-foreground: 210 40% 98%;
+  --border: 217 33% 22%;
+  --input: 217 33% 22%;
+  --ring: 215 28% 47%;
+  --radius: 0.75rem;
 }
 
-html, body {
-  margin: 0;
-  padding: 0;
-  height: 100%;
-  background: var(--bg);
-  color: #fff;
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
 }
 
-.container-responsive {
-  width: min(1200px, 100%);
-  margin-inline: auto;
+@layer components {
+  .card {
+    @apply bg-card text-card-foreground border rounded-lg;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply bg-primary text-primary-foreground hover:bg-primary/90;
+  }
+  .btn-secondary {
+    @apply bg-secondary text-secondary-foreground hover:bg-secondary/80;
+  }
+  .input {
+    @apply flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50;
+  }
 }
-
-.card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-}
-
-.btn {
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: #1f2937; /* slate-800-ish */
-  padding: 6px 12px;
-  font-size: 0.875rem;
-}
-.btn:hover { background: #2b3342; }
-
-.btn-primary {
-  background: #059669; /* emerald-600 */
-  border-color: transparent;
-}
-.btn-primary:hover { background: #10b981; }
-
-/* skeleton loading shimmer */
-.skeleton {
-  position: relative;
-  overflow: hidden;
-  background: rgba(255,255,255,0.08);
-  border-radius: 10px;
-}
-.skeleton::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  transform: translateX(-100%);
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.12), transparent);
-  animation: shimmer 1.2s infinite;
-}
-@keyframes shimmer { 100% { transform: translateX(100%); } }
