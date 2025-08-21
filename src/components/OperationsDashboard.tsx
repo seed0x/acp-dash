@@ -1,6 +1,7 @@
 'use client'
 
-import React, { useState, useEffect, useMemo } from 'react';
+import { useState } from "react";
+import type { KPI, ProjectRow, OpsProps } from "@/types/ops";
 import { 
   Plus, Camera, CheckCircle2, Search, User, Building, MapPin, 
   DollarSign, Clock, TrendingUp, AlertCircle, CheckSquare,
