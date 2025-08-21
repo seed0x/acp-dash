@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 
 /* ---------- Types (UI-shape only) ---------- */
 type KPI = { postAndBeam: number; activeBids: number; jobAccountsPending: number; openProblems: number };
@@ -17,11 +18,6 @@ async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
   try { data = txt ? JSON.parse(txt) : null } catch {}
   if (!res.ok) throw new Error((data?.error || data?.message) ?? `${res.status} ${res.statusText}`);
   return data as T;
-}
-function fmtMoney(n?: number | null) {
-  if (n == null) return '-';
-  try { return Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' }).format(n); }
-  catch { return String(n); }
 }
 
 export default function OperationsDashboard() {
@@ -196,15 +192,16 @@ export default function OperationsDashboard() {
           <div className="grid gap-2 max-h-[420px] overflow-y-auto pr-1">
             {filteredPending.map((row) => (
               <div key={row.id} className="flex items-center justify-between p-2 rounded bg-black/20 border border-[var(--border)]">
-                <div className="min-w-0">
+                <Link href={`/projects/${row.id}`} className="min-w-0 flex-grow">
                   <div className="font-medium truncate">{row.title || 'Untitled'}</div>
                   <div className="text-xs text-[var(--muted)] truncate">
-                    {[row.client, row.location].filter(Boolean).join(' • ')}
+                    {row.client}{row.client && row.location && ' • '}{row.location}
                   </div>
-                </div>
+                </Link>
                 <button
-                  className="btn btn-primary shrink-0"
-                  onClick={async () => {
+                  className="btn btn-primary shrink-0 ml-2"
+                  onClick={async (e) => {
+                    e.stopPropagation();
                     try {
                       await fetch('/api/projects/job-account', {
                         method: 'PATCH',
@@ -212,7 +209,7 @@ export default function OperationsDashboard() {
                         body: JSON.stringify({ id: row.id, value: true }),
                       });
                       await load();
-                    } catch (e: any) { setError(e?.message || String(e)); }
+                    } catch (err: any) { setError(err?.message || String(err)); }
                   }}
                 >
                   Mark Created
@@ -289,12 +286,25 @@ export default function OperationsDashboard() {
                 </div>
                 <div className="grid gap-2 max-h-[360px] overflow-y-auto pr-1">
                   {rows.map(r => (
-                    <div key={r.id} className="rounded bg-black/20 border border-[var(--border)] p-2">
+                    <Link href={`/projects/${r.id}`} key={r.id} className="block rounded bg-black/20 border border-[var(--border)] p-2 hover:bg-black/40">
                       <div className="font-medium truncate">{r.title}</div>
-                      <div className="text-xs text-[var(--muted)] truncate">
-                        {[r.client, r.location].filter(Boolean).join(' • ')}
+                      <div className="text-xs text-[var(--muted)] truncate mt-1">
+                        {r.client && <span>{r.client}</span>}
+                        {r.client && r.location && <span className="mx-1">•</span>}
+                        {r.location && (
+                          <span
+                            className="hover:underline text-blue-400"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              window.open(`http://maps.apple.com/?q=${encodeURIComponent(r.location!)}`, '_blank');
+                            }}
+                          >
+                            {r.location}
+                          </span>
+                        )}
                       </div>
-                    </div>
+                    </Link>
                   ))}
                 </div>
               </div>
