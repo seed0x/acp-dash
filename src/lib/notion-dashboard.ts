@@ -1,9 +1,6 @@
 // src/lib/notion-dashboard.ts
 import { Client } from '@notionhq/client'
 
-/** -------------------------------
- * Notion client + DB ID helpers
- * ------------------------------- */
 export const notion = new Client({
   auth: process.env.NOTION_TOKEN || process.env.NOTION_API_KEY,
 })
@@ -18,20 +15,20 @@ export const EXPENSES_DB_ID = '223333490a118162b8dec59721702e1c'
 export const IMPROVEMENTS_DB_ID = '223333490a1181efbdefdf74b0b4f6a6'
 export const DOCUMENTATION_DB_ID = '223333490a11816bbcd0f0aedc40628c'
 
-/** -------------------------------
- * Property readers - FIXED FOR ACTUAL TYPES
- * ------------------------------- */
-const readTitle = (p: any, key: string) => p?.[key]?.title?.map((t: any) => t.plain_text).join('') || 'Untitled';
+// Property readers - Fixed for proper types
+const readTitle = (p: any, key: string) => p?.[key]?.title?.map((t: any) => t.plain_text).join('') || '';
 
 const readTextish = (p: any, key?: string) => {
   if (!key || !p[key]) return undefined;
   const prop = p[key];
   if (prop.type === 'rich_text') return prop.rich_text.map((t: any) => t.plain_text).join('');
   if (prop.type === 'select') return prop.select?.name;
-  if (prop.type === 'status') return prop.status?.name; // FIXED: Added status type
+  if (prop.type === 'status') return prop.status?.name;
   if (prop.type === 'checkbox') return prop.checkbox;
   if (prop.type === 'number') return prop.number;
   if (prop.type === 'files') return prop.files?.[0]?.file?.url;
+  if (prop.type === 'date') return prop.date?.start;
+  if (prop.type === 'multi_select') return prop.multi_select?.map((s: any) => s.name).join(', ');
   return undefined;
 };
 
@@ -51,14 +48,13 @@ const queryAll = async (opts: any) => {
   return results;
 };
 
-// Helper to resolve relation page titles
+// Get page title helper
 const titleCache = new Map<string, string>();
 async function getPageTitle(pageId: string): Promise<string> {
   if (titleCache.has(pageId)) return titleCache.get(pageId)!;
   try {
     const page = await notion.pages.retrieve({ page_id: pageId }) as any;
     const props = page.properties || {};
-    // Find title property
     const titleProp = Object.values(props).find((p: any) => p?.type === 'title') as any;
     const title = titleProp?.title?.map((t: any) => t.plain_text).join('') || 'Untitled';
     titleCache.set(pageId, title);
@@ -69,25 +65,21 @@ async function getPageTitle(pageId: string): Promise<string> {
   }
 }
 
-/** -------------------------------
- * Public dashboard functions - FIXED FILTER TYPES
- * ------------------------------- */
-
-// Count projects in Post & Beam phase - FIXED: status type, not select
+// Count projects in Post & Beam phase
 export const countPostAndBeam = async (): Promise<number> => {
   try {
-    console.log('Counting Post & Beam projects...');
     const results = await queryAll({
       database_id: PROJECTS_DB_ID,
       filter: {
         or: [
           { property: 'Status', status: { equals: 'Post & Beam' } },
           { property: 'Status', status: { equals: 'Foundation' } },
-          { property: 'Status', status: { equals: 'Rough-in' } }
+          { property: 'Status', status: { equals: 'Rough-in' } },
+          { property: 'Status', status: { equals: 'Rough In' } },
+          { property: 'Status', status: { equals: 'Framing' } }
         ]
       }
     });
-    console.log(`Found ${results.length} Post & Beam projects`);
     return results.length;
   } catch (e) {
     console.error('Error counting Post & Beam projects:', e);
@@ -95,10 +87,16 @@ export const countPostAndBeam = async (): Promise<number> => {
   }
 };
 
-// List active bids - FIXED: status type, not select
-export const listBids = async (): Promise<Array<{ id: string; title: string; client?: string }>> => {
+// List active bids with bidding sub-status tracking
+export const listBids = async (): Promise<Array<{ 
+  id: string; 
+  title: string; 
+  client?: string;
+  builder?: string;
+  location?: string;
+  biddingStatus?: string; // New field for tracking bid progress
+}>> => {
   try {
-    console.log('Listing active bids...');
     const results = await queryAll({
       database_id: PROJECTS_DB_ID,
       filter: {
@@ -106,7 +104,8 @@ export const listBids = async (): Promise<Array<{ id: string; title: string; cli
           { property: 'Status', status: { equals: 'Bidding' } },
           { property: 'Status', status: { equals: 'Proposal' } },
           { property: 'Status', status: { equals: 'Quote Sent' } },
-          { property: 'Status', status: { equals: 'Pending' } }
+          { property: 'Status', status: { equals: 'Pending' } },
+          { property: 'Status', status: { equals: 'New Lead' } }
         ]
       }
     });
@@ -116,11 +115,13 @@ export const listBids = async (): Promise<Array<{ id: string; title: string; cli
       return {
         id: r.id,
         title: readTitle(props, 'Project'),
-        client: readTextish(props, 'Client')
+        client: readTextish(props, 'Client'),
+        builder: readTextish(props, 'Builder'),
+        location: readTextish(props, 'Location'),
+        biddingStatus: readTextish(props, 'BiddingStatus') || 'new' // Track sub-status
       };
     });
     
-    console.log(`Found ${bids.length} active bids`);
     return bids;
   } catch (e) {
     console.error('Error listing bids:', e);
@@ -128,10 +129,14 @@ export const listBids = async (): Promise<Array<{ id: string; title: string; cli
   }
 };
 
-// List projects needing job account setup - FIXED: checkbox type
-export async function listJobAccountPending(): Promise<Array<{ id: string; title: string; client?: string }>> {
+// List projects needing job account setup
+export async function listJobAccountPending(): Promise<Array<{ 
+  id: string; 
+  title: string; 
+  client?: string;
+  description?: string; // What needs to be setup
+}>> {
   try {
-    console.log('Listing job account pending...');
     const results = await queryAll({
       database_id: PROJECTS_DB_ID,
       filter: {
@@ -147,11 +152,11 @@ export async function listJobAccountPending(): Promise<Array<{ id: string; title
       return {
         id: r.id,
         title: readTitle(props, 'Project'),
-        client: readTextish(props, 'Client')
+        client: readTextish(props, 'Client'),
+        description: 'QuickBooks job account needs to be created' // Clarify what this is
       };
     });
     
-    console.log(`Found ${pending.length} pending job accounts`);
     return pending;
   } catch (e) {
     console.error('Error listing job account pending:', e);
@@ -159,15 +164,23 @@ export async function listJobAccountPending(): Promise<Array<{ id: string; title
   }
 }
 
-// List improvements/issues - FIXED: property name and status type
-export async function listImprovements(openOnly?: boolean): Promise<Array<{ id: string; title: string; status?: string; projectName?: string }>> {
+// List improvements/issues with better detail
+export async function listImprovements(openOnly?: boolean): Promise<Array<{ 
+  id: string; 
+  title: string; 
+  status?: string; 
+  projectName?: string;
+  description?: string;
+  priority?: string;
+  assignee?: string;
+}>> {
   try {
-    console.log('Listing improvements...');
     const filters: any[] = [];
     if (openOnly) {
       filters.push({
         or: [
           { property: 'Status', status: { does_not_equal: 'Done' } },
+          { property: 'Status', status: { does_not_equal: 'Complete' } },
           { property: 'Status', status: { is_empty: true } }
         ]
       });
@@ -189,13 +202,15 @@ export async function listImprovements(openOnly?: boolean): Promise<Array<{ id: 
 
       return {
         id: r.id,
-        title: readTitle(props, 'Improvement'), // FIXED: Use correct property name
-        status: readTextish(props, 'Status'),
-        projectName
+        title: readTitle(props, 'Improvement'),
+        status: readTextish(props, 'Status') || 'Open',
+        projectName,
+        description: readTextish(props, 'Description'),
+        priority: readTextish(props, 'Priority'),
+        assignee: readTextish(props, 'Assignee')
       };
     }));
     
-    console.log(`Found ${improvements.length} improvements`);
     return improvements;
   } catch (e) {
     console.error('Error listing improvements:', e);
@@ -203,31 +218,34 @@ export async function listImprovements(openOnly?: boolean): Promise<Array<{ id: 
   }
 }
 
-// Create new improvement - FIXED: property name
-export async function createImprovement(input: { projectId: string; title: string }) {
+// Create new improvement
+export async function createImprovement(input: { 
+  projectId: string; 
+  title: string;
+  priority?: string;
+}) {
   try {
-    console.log(`Creating improvement for project ${input.projectId}: ${input.title}`);
     await notion.pages.create({
       parent: { database_id: IMPROVEMENTS_DB_ID },
       properties: {
-        'Improvement': { title: [{ text: { content: input.title } }] }, // FIXED: Use correct property name
+        'Improvement': { title: [{ text: { content: input.title } }] },
         'Projects': { relation: [{ id: input.projectId }] },
-        'Status': { status: { name: 'Open' } } // FIXED: status type
+        'Status': { status: { name: 'Open' } },
+        ...(input.priority && { 'Priority': { select: { name: input.priority } } })
       }
     } as any);
-    console.log('Improvement created successfully');
   } catch (e) {
     console.error('Error creating improvement:', e);
     throw new Error(`Failed to create improvement: ${e instanceof Error ? e.message : 'Unknown error'}`);
   }
 }
 
-// Update improvement status - FIXED: status type
+// Update improvement status
 export async function updateImprovementStatus(id: string, status: string) {
   try {
     await notion.pages.update({ 
       page_id: id, 
-      properties: { 'Status': { status: { name: status } } } // FIXED: status type
+      properties: { 'Status': { status: { name: status } } }
     } as any);
   } catch (e) {
     console.error('Error updating improvement status:', e);
@@ -235,12 +253,12 @@ export async function updateImprovementStatus(id: string, status: string) {
   }
 }
 
-// Toggle job account setup - FIXED: checkbox type
+// Toggle job account setup
 export async function toggleJobAccount(id: string, value: boolean) {
   try {
     await notion.pages.update({ 
       page_id: id, 
-      properties: { 'Job Account Setup': { checkbox: value } } // FIXED: checkbox type
+      properties: { 'Job Account Setup': { checkbox: value } }
     } as any);
   } catch (e) {
     console.error('Error toggling job account:', e);
@@ -251,7 +269,6 @@ export async function toggleJobAccount(id: string, value: boolean) {
 // List all projects for dropdowns
 export async function listProjectOptions(): Promise<Array<{ id: string; title: string }>> {
   try {
-    console.log('Listing project options...');
     const results = await queryAll({ 
       database_id: PROJECTS_DB_ID, 
       page_size: 100,
@@ -263,7 +280,6 @@ export async function listProjectOptions(): Promise<Array<{ id: string; title: s
       title: readTitle(r.properties, 'Project') 
     }));
     
-    console.log(`Found ${options.length} project options`);
     return options;
   } catch (e) {
     console.error('Error listing project options:', e);
@@ -271,23 +287,23 @@ export async function listProjectOptions(): Promise<Array<{ id: string; title: s
   }
 }
 
-// Get projects for board view with search and filtering
+// Get projects for board view with enhanced search and filtering
 export async function listProjectsBoard(input: { q?: string; status?: string }): Promise<{
   items: Array<{ 
     id: string; 
     title: string; 
     status?: string; 
     client?: string; 
+    builder?: string; // Added builder field
     location?: string; 
     deadline?: string;
     budget?: string;
     budgetSpent?: number;
+    biddingStatus?: string; // For tracking bid progress
   }>
   statusOptions: string[]
 }> {
   try {
-    console.log('Listing projects for board...');
-    // Get all projects first
     const results = await queryAll({
       database_id: PROJECTS_DB_ID,
       sorts: [{ property: 'Last edited time', direction: 'descending' }]
@@ -306,10 +322,12 @@ export async function listProjectsBoard(input: { q?: string; status?: string }):
         title: readTitle(props, 'Project'),
         status: readTextish(props, 'Status'),
         client: readTextish(props, 'Client'),
+        builder: readTextish(props, 'Builder'), // Include builder
         location: readTextish(props, 'Location'),
         deadline: readTextish(props, 'Deadline'),
         budget: readTextish(props, 'Budget'),
         budgetSpent: readTextish(props, 'Budget spent') as number,
+        biddingStatus: readTextish(props, 'BiddingStatus')
       };
     });
 
@@ -321,13 +339,12 @@ export async function listProjectsBoard(input: { q?: string; status?: string }):
     if (input.q) {
       const query = input.q.toLowerCase();
       items = items.filter(item =>
-        [item.title, item.client, item.location].some(v => 
+        [item.title, item.client, item.builder, item.location].some(v => 
           (v || '').toLowerCase().includes(query)
         )
       );
     }
 
-    console.log(`Board: ${items.length} items, ${statusOptions.length} status options`);
     return { items, statusOptions };
   } catch (e) {
     console.error('Error listing projects board:', e);
@@ -335,10 +352,40 @@ export async function listProjectsBoard(input: { q?: string; status?: string }):
   }
 }
 
+// Update project phase status
+export async function updateProjectStatus(id: string, status: string) {
+  try {
+    await notion.pages.update({
+      page_id: id,
+      properties: {
+        'Status': { status: { name: status } }
+      }
+    } as any);
+  } catch (e) {
+    console.error('Error updating project status:', e);
+    throw new Error('Failed to update project status');
+  }
+}
+
+// Update bidding sub-status (for tracking follow-ups, won/lost, etc.)
+export async function updateBiddingStatus(id: string, biddingStatus: string) {
+  try {
+    await notion.pages.update({
+      page_id: id,
+      properties: {
+        'BiddingStatus': { select: { name: biddingStatus } }
+      }
+    } as any);
+  } catch (e) {
+    console.error('Error updating bidding status:', e);
+    // If BiddingStatus property doesn't exist, you might need to create it in Notion first
+    throw new Error('Failed to update bidding status. Make sure BiddingStatus property exists in Notion.');
+  }
+}
+
 // Get full project details
 export async function getProjectFull(id: string): Promise<any> {
   try {
-    console.log(`Getting full project details for ${id}`);
     const page: any = await notion.pages.retrieve({ page_id: id });
     const props = page.properties || {};
 
@@ -346,6 +393,7 @@ export async function getProjectFull(id: string): Promise<any> {
       id,
       title: readTitle(props, 'Project'),
       client: readTextish(props, 'Client'),
+      builder: readTextish(props, 'Builder'), // Include builder
       location: readTextish(props, 'Location'),
       status: readTextish(props, 'Status'),
       budget: readTextish(props, 'Budget'),
@@ -358,21 +406,24 @@ export async function getProjectFull(id: string): Promise<any> {
       team: readTextish(props, 'Team'),
       subDivision: readTextish(props, 'Sub-Division'),
       constructionPhase: readTextish(props, 'Construction Phase'),
+      biddingStatus: readTextish(props, 'BiddingStatus')
     };
 
-    // Get related photos - FIXED: Use correct property names
+    // Get related photos with dates
     const photoResults = await queryAll({
       database_id: PHOTOS_DB_ID,
-      filter: { property: 'Projects', relation: { contains: id } }
+      filter: { property: 'Projects', relation: { contains: id } },
+      sorts: [{ property: 'Date', direction: 'descending' }] // Sort by date
     });
 
     const photos = photoResults.map((photo: any) => {
       const photoProps = photo.properties || {};
-      const files = photoProps['Photo']?.files || []; // FIXED: Use 'Photo' property
+      const files = photoProps['Photo']?.files || [];
       return {
         id: photo.id,
         description: readTitle(photoProps, 'Name') || 'Photo',
-        url: files[0]?.file?.url || files[0]?.external?.url || ''
+        url: files[0]?.file?.url || files[0]?.external?.url || '',
+        date: readTextish(photoProps, 'Date') // Include date
       };
     }).filter((photo: any) => photo.url);
 
@@ -388,14 +439,14 @@ export async function getProjectFull(id: string): Promise<any> {
         id: task.id,
         title: readTitle(taskProps, 'Task'),
         status: readTextish(taskProps, 'Status'),
-        assignee: readTextish(taskProps, 'Asignee'), // Note: keeping original spelling
+        assignee: readTextish(taskProps, 'Asignee'),
         due: readTextish(taskProps, 'Due Date'),
         category: readTextish(taskProps, 'Category'),
         comment: readTextish(taskProps, 'Comment')
       };
     });
 
-    // Get related improvements - FIXED: Use correct property name
+    // Get related improvements with more detail
     const improvementResults = await queryAll({
       database_id: IMPROVEMENTS_DB_ID,
       filter: { property: 'Projects', relation: { contains: id } }
@@ -405,8 +456,11 @@ export async function getProjectFull(id: string): Promise<any> {
       const improvementProps = improvement.properties || {};
       return {
         id: improvement.id,
-        title: readTitle(improvementProps, 'Improvement'), // FIXED: Use correct property name
-        status: readTextish(improvementProps, 'Status')
+        title: readTitle(improvementProps, 'Improvement'),
+        status: readTextish(improvementProps, 'Status'),
+        description: readTextish(improvementProps, 'Description'),
+        priority: readTextish(improvementProps, 'Priority'),
+        assignee: readTextish(improvementProps, 'Assignee')
       };
     });
 
@@ -422,18 +476,18 @@ export async function getProjectFull(id: string): Promise<any> {
         id: expense.id,
         name: readTitle(expenseProps, 'Name') || 'Expense',
         category: readTextish(expenseProps, 'Category'),
-        value: readTextish(expenseProps, 'Amount') || readTextish(expenseProps, 'Value') || 0
+        value: readTextish(expenseProps, 'Amount') || readTextish(expenseProps, 'Value') || 0,
+        date: readTextish(expenseProps, 'Date')
       };
     });
 
-    console.log(`Project details: ${photos.length} photos, ${tasks.length} tasks, ${improvements.length} improvements`);
     return { 
       project, 
       photos, 
       tasks, 
       improvements, 
       expenses, 
-      time: [] // Time tracking to be implemented if needed
+      time: []
     };
   } catch (e) {
     console.error('Error getting project full:', e);
@@ -441,17 +495,23 @@ export async function getProjectFull(id: string): Promise<any> {
   }
 }
 
-// Create photo entry - FIXED: Use correct property names
-export async function createPhotoEntry(input: { projectId: string; description: string; photoUrl: string }) {
+// Create photo entry with automatic date
+export async function createPhotoEntry(input: { 
+  projectId: string; 
+  description: string; 
+  photoUrl: string;
+  date?: string; // Optional date, defaults to today
+}) {
   try {
-    console.log(`Creating photo entry for project ${input.projectId}: ${input.description}`);
+    const photoDate = input.date || new Date().toISOString().split('T')[0];
     
     await notion.pages.create({
       parent: { database_id: PHOTOS_DB_ID },
       properties: {
         'Name': { title: [{ text: { content: input.description || 'Photo' } }] },
         'Projects': { relation: [{ id: input.projectId }] },
-        'Photo': { // FIXED: Use correct property name from debug output
+        'Date': { date: { start: photoDate } }, // Automatically add date
+        'Photo': { 
           files: [{ 
             name: input.description || 'Photo',
             external: { url: input.photoUrl } 
@@ -460,10 +520,9 @@ export async function createPhotoEntry(input: { projectId: string; description: 
       }
     } as any);
     
-    console.log('Photo entry created successfully');
+    console.log(`Photo created with date: ${photoDate}`);
   } catch (e) {
     console.error('Error creating photo entry:', e);
-    console.error('Full error:', JSON.stringify(e, null, 2));
     throw new Error(`Failed to create photo entry: ${e instanceof Error ? e.message : 'Unknown error'}`);
   }
 }
