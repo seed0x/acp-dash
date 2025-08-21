@@ -1,20 +1,12 @@
 // src/app/api/tasks/[id]/route.ts
-<<<<<<< HEAD
 import { NextResponse } from 'next/server';
 import { notion } from '@/lib/notion-dashboard';
 
 export async function PATCH(
-=======
-import { NextResponse } from 'next/server'
-import { getTaskDetails } from '@/lib/notion-dashboard'
-
-export async function GET(
->>>>>>> cbb247b65144487225fbcad712d4331fa45b7a3b
   req: Request,
   { params }: { params: { id: string } }
 ) {
   try {
-<<<<<<< HEAD
     const { completed, status, assignee } = await req.json();
     
     if (!params.id) {
@@ -85,21 +77,5 @@ export async function DELETE(
     return NextResponse.json({ 
       error: e?.message || 'Failed to delete task' 
     }, { status: 500 });
-=======
-    const task = await getTaskDetails(params.id)
-    
-    if (!task) {
-      return NextResponse.json({ 
-        error: 'Task not found' 
-      }, { status: 404 })
-    }
-    
-    return NextResponse.json({ task })
-  } catch (e: any) {
-    console.error('Task detail GET API error:', e);
-    return NextResponse.json({ 
-      error: e?.message || 'Failed to fetch task details' 
-    }, { status: 500 })
->>>>>>> cbb247b65144487225fbcad712d4331fa45b7a3b
   }
 }
