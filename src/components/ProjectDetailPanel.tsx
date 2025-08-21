@@ -2,12 +2,14 @@
 
 import { useState, useEffect } from 'react';
 
+type Photo = { id: string; description: string; url: string; };
 type ProjectFull = {
   project: { id: string; title: string; client?: string; location?: string; builder?: string; status?: string; budget?: number; spent?: number; totalExpenses?: number; totalHours?: number; openTasks?: number; openImprovements?: number; };
   improvements: Array<{ id: string; title: string; status?: string }>;
   tasks: Array<{ id: string; title: string; status?: string; assignee?: string; due?: string }>;
   expenses: Array<{ id: string; name: string; category?: string; value?: number }>;
   time: Array<{ id: string; name: string; person?: string; date?: string; hours?: number }>;
+  photos: Array<Photo>;
 };
 
 function fmtMoney(n?: number | null) {
@@ -15,7 +17,7 @@ function fmtMoney(n?: number | null) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n);
 }
 
-const TABS = ['Details', 'Expenses', 'Tasks', 'Improvements', 'Time'];
+const TABS = ['Details', 'Photos', 'Expenses', 'Tasks', 'Improvements', 'Time'];
 
 export default function ProjectDetailPanel({ projectId, onClose }: { projectId: string; onClose: () => void }) {
   const [data, setData] = useState<ProjectFull | null>(null);
@@ -41,16 +43,12 @@ export default function ProjectDetailPanel({ projectId, onClose }: { projectId: 
     fetchData();
   }, [projectId]);
 
-  const { project, expenses, tasks, improvements, time } = data || {};
+  const { project, expenses, tasks, improvements, time, photos } = data || {};
 
   return (
     <div className="fixed inset-0 z-30">
-      {/* Backdrop */}
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      
-      {/* Panel */}
       <div className="relative z-10 bg-[#0F172A] border-l border-[var(--border)] h-full w-full max-w-2xl ml-auto flex flex-col">
-        {/* Header */}
         <div className="flex-shrink-0 p-4 border-b border-[var(--border)]">
           <div className="flex items-start justify-between">
             {loading ? <div className="h-8 w-3/4 skeleton" /> : (
@@ -62,12 +60,12 @@ export default function ProjectDetailPanel({ projectId, onClose }: { projectId: 
             <button onClick={onClose} className="text-2xl text-[var(--muted)] hover:text-white">&times;</button>
           </div>
           <div className="mt-4 border-b border-[var(--border)]">
-            <nav className="-mb-px flex gap-4 text-sm">
+            <nav className="-mb-px flex gap-4 text-sm overflow-x-auto">
               {TABS.map(tab => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
-                  className={`py-2 px-1 border-b-2 ${activeTab === tab ? 'border-blue-400 text-white' : 'border-transparent text-[var(--muted)] hover:text-white'}`}
+                  className={`py-2 px-1 border-b-2 whitespace-nowrap ${activeTab === tab ? 'border-blue-400 text-white' : 'border-transparent text-[var(--muted)] hover:text-white'}`}
                 >
                   {tab}
                 </button>
@@ -75,14 +73,13 @@ export default function ProjectDetailPanel({ projectId, onClose }: { projectId: 
             </nav>
           </div>
         </div>
-
-        {/* Content */}
         <div className="flex-grow p-4 overflow-y-auto">
           {loading && <div className="w-full h-64 skeleton" />}
           {error && <div className="text-red-400">Error: {error}</div>}
           {data && (
             <div>
               {activeTab === 'Details' && project && <DetailsTab project={project} />}
+              {activeTab === 'Photos' && <PhotosTab items={photos!} />}
               {activeTab === 'Expenses' && <ExpensesTab items={expenses!} />}
               {activeTab === 'Tasks' && <TasksTab items={tasks!} />}
               {activeTab === 'Improvements' && <ImprovementsTab items={improvements!} />}
@@ -121,6 +118,19 @@ const DetailsTab = ({ project }: { project: ProjectFull['project'] }) => (
         <div><div className="text-[var(--muted)]">Total Hours</div><div className="font-semibold">{project.totalHours?.toFixed(2) ?? '-'} hrs</div></div>
       </div>
     </div>
+  </div>
+);
+
+const PhotosTab = ({ items }: { items: Photo[] }) => (
+  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+    {items.length > 0 ? items.map(it => (
+      <div key={it.id} className="card overflow-hidden">
+        <a href={it.url} target="_blank" rel="noopener noreferrer">
+          <img src={it.url} alt={it.description} className="w-full h-40 object-cover bg-black/20" />
+        </a>
+        <p className="p-2 text-xs text-[var(--muted)]">{it.description}</p>
+      </div>
+    )) : <p className="text-sm text-[var(--muted)] col-span-full">No photos for this project yet.</p>}
   </div>
 );
 

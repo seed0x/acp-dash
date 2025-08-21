@@ -16,6 +16,9 @@ export const PROJECTS_DB_ID =
 export const CLIENTS_DB_ID = 
   env('NEXT_PUBLIC_NOTION_CLIENTS_DB_ID') || env('NOTION_CLIENTS_DB_ID') || env('CLIENTS_DB_ID') || ''
 
+export const PHOTOS_DB_ID =
+  env('NEXT_PUBLIC_NOTION_PHOTOS_DB_ID') || env('NOTION_PHOTOS_DB_ID') || env('PHOTOS_DB_ID') || ''
+
 export const IMPROVEMENTS_DB_ID =
   env('NEXT_PUBLIC_NOTION_IMPROVEMENTS_DB_ID') || env('NOTION_IMPROVEMENTS_DB_ID') || env('IMPROVEMENTS_DB_ID') || ''
 
@@ -154,6 +157,7 @@ function readTextish(p: any, key?: string): string | undefined {
   if (prop.type === 'phone_number') return prop.phone_number
   if (prop.type === 'number') return String(prop.number ?? '')
   if (prop.type === 'date') return prop.date?.start
+  if (prop.type === 'files') return prop.files?.[0]?.file?.url; // For reading photo URLs
   return undefined
 }
 function readNumber(p: any, key?: string): number | undefined {
@@ -409,7 +413,6 @@ export async function listProjectsBoard(input: { q?: string; status?: string }):
   if (q) {
     const orFilters: any[] = [{ property: keys.title, title: { contains: q } }]
     if (keys.location) orFilters.push({ property: keys.location, rich_text: { contains: q } })
-    // Note: Client relation search is client-side for simplicity
     andFilters.push({ or: orFilters })
   }
   
@@ -450,29 +453,12 @@ export async function listProjectsBoard(input: { q?: string; status?: string }):
 
 /** 10) Full project detail with totals */
 export async function getProjectFull(id: string): Promise<{
-  project: {
-    id: string
-    title: string
-    client?: string
-    location?: string
-    builder?: string
-    status?: string
-    jobAccount?: boolean
-    followUp?: boolean | string
-    budget?: number
-    spent?: number
-    deadline?: string
-    totalExpenses?: number
-    totalHours?: number
-    openTasks?: number
-    openImprovements?: number
-  }
-  improvements: Array<{ id: string; title: string; status?: string }>
-  tasks: Array<{ id: string; title: string; status?: string; assignee?: string; due?: string }>
-  expenses: Array<{ id: string; name: string; category?: string; value?: number }>
-  time: Array<{ id: string; name: string; person?: string; date?: string; hours?: number }>
-  notes: Array<{ id: string; title: string; created?: string }>
-  docs: Array<{ id: string; title: string; description?: string }>
+  project: { id: string; title: string; client?: string; location?: string; builder?: string; status?: string; jobAccount?: boolean; followUp?: boolean | string; budget?: number; spent?: number; deadline?: string; totalExpenses?: number; totalHours?: number; openTasks?: number; openImprovements?: number; };
+  improvements: Array<{ id: string; title: string; status?: string }>;
+  tasks: Array<{ id: string; title: string; status?: string; assignee?: string; due?: string }>;
+  expenses: Array<{ id: string; name: string; category?: string; value?: number }>;
+  time: Array<{ id: string; name: string; person?: string; date?: string; hours?: number }>;
+  photos: Array<{ id: string; description: string; url: string }>;
 }> {
   if (!PROJECTS_DB_ID) throw new Error('PROJECTS_DB_ID missing')
   const keys = await getProjectKeys(PROJECTS_DB_ID)
@@ -503,54 +489,65 @@ export async function getProjectFull(id: string): Promise<{
     deadline: readTextish(p, keys.deadline),
   }
 
-  async function listRelated(dbId?: string) {
+  async function listRelated(dbId?: string, relationName = 'Project') {
     if (!dbId) return []
     const db: any = await notion.databases.retrieve({ database_id: dbId })
     const props = db.properties || {}
-    const relKey = Object.keys(props).find(k => props[k]?.type === 'relation' && props[k]?.relation?.database_id === PROJECTS_DB_ID)
+    const relKey = Object.keys(props).find(k => k === relationName && props[k]?.type === 'relation' && props[k]?.relation?.database_id === PROJECTS_DB_ID)
     if (!relKey) return []
     return await queryAll({ database_id: dbId, filter: { property: relKey, relation: { contains: id } } as any })
   }
 
-  const [impRows, taskRows, expRows, timeRows, noteRows, docRows] = await Promise.all([
+  const [impRows, taskRows, expRows, timeRows, photoRows] = await Promise.all([
     listRelated(IMPROVEMENTS_DB_ID),
     listRelated(TASKS_DB_ID),
     listRelated(EXPENSES_DB_ID),
     listRelated(TIME_DB_ID),
-    listRelated(NOTES_DB_ID),
-    listRelated(DOCS_DB_ID),
+    listRelated(PHOTOS_DB_ID, 'Project'),
   ]);
-
-  const mapRelated = (rows: any[], typeMap: Record<string, string>) => {
-    return rows.map((r) => {
-      const p = r.properties || {};
-      const item: any = { id: r.id };
-      for (const [key, type] of Object.entries(typeMap)) {
-        const propKey = Object.keys(p).find(k => p[k].type === type);
-        if (propKey) {
-          if (type === 'title') item[key] = readTitle(p, propKey);
-          else if (type === 'number') item[key] = readNumber(p, propKey);
-          else if (type === 'people') item[key] = p[propKey]?.people?.[0]?.name;
-          else if (type === 'date') item[key] = p[propKey]?.date?.start;
-          else if (type === 'created_time') item[key] = p[propKey]?.created_time;
-          else item[key] = readTextish(p, propKey);
-        }
-      }
-      return item;
-    });
-  }
+  
+  const mapRelated = (rows: any[], typeMap: Record<string, string>) => rows.map((r) => {
+    const p = r.properties || {};
+    const item: any = { id: r.id };
+    for (const [key, type] of Object.entries(typeMap)) {
+      const propKey = Object.keys(p).find(k => p[k].type === type);
+      if(!propKey) continue;
+      if (type === 'title') item[key] = readTitle(p, propKey);
+      else if (type === 'number') item[key] = readNumber(p, propKey);
+      else if (type === 'people') item[key] = p[propKey]?.people?.[0]?.name;
+      else if (type === 'date') item[key] = p[propKey]?.date?.start;
+      else if (type === 'files') item[key] = readTextish(p, propKey);
+      else item[key] = readTextish(p, propKey);
+    }
+    return item;
+  });
 
   const improvements = mapRelated(impRows, { title: 'title', status: 'status' });
   const tasks = mapRelated(taskRows, { title: 'title', status: 'status', assignee: 'people', due: 'date' });
   const expenses = mapRelated(expRows, { name: 'title', category: 'select', value: 'number' });
   const time = mapRelated(timeRows, { name: 'title', person: 'people', date: 'date', hours: 'number' });
-  const notes = mapRelated(noteRows, { title: 'title', created: 'created_time' });
-  const docs = mapRelated(docRows, { title: 'title', description: 'rich_text' });
+  const photos = mapRelated(photoRows, { description: 'title', url: 'files' });
 
   const totalExpenses = expenses.reduce((s, e) => s + (e.value || 0), 0)
   const totalHours = time.reduce((s, t) => s + (t.hours || 0), 0)
   const openTasks = tasks.filter(t => t.status?.toLowerCase() !== 'done').length
   const openImprovements = improvements.filter(i => i.status?.toLowerCase() !== 'done').length
 
-  return { project: { ...proj, totalExpenses, totalHours, openTasks, openImprovements }, improvements, tasks, expenses, time, notes, docs }
+  return { project: { ...proj, totalExpenses, totalHours, openTasks, openImprovements }, improvements, tasks, expenses, time, photos }
+}
+
+/** 11) Create Photo Entry */
+export async function createPhotoEntry(input: { projectId: string; description: string; photoUrl: string }) {
+  if (!PHOTOS_DB_ID) throw new Error('PHOTOS_DB_ID missing');
+
+  const properties: any = {
+    'Name': { title: [{ text: { content: input.description } }] },
+    'Photo': { files: [{ name: input.description, external: { url: input.photoUrl } }] },
+    'Project': { relation: [{ id: input.projectId }] },
+  };
+
+  await notion.pages.create({
+    parent: { database_id: PHOTOS_DB_ID },
+    properties,
+  } as any);
 }

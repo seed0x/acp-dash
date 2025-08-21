@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import ProjectDetailPanel from './ProjectDetailPanel';
+import AddPhotoCard from './AddPhotoCard';
 
 type KPI = { postAndBeam: number; activeBids: number; jobAccountsPending: number; openProblems: number };
 type ProjectRow = { id: string; title: string; client?: string; location?: string; status?: string };
@@ -130,7 +131,7 @@ function DashboardComponent({ initialKpis, initialPendingAcct, initialProblems }
           </div>
           <div className="p-3 max-h-[420px] overflow-y-auto pr-1"><div className="grid gap-2">
             {filteredPending.map(row => (
-              <div key={row.id} className="flex items-center justify-between p-2 rounded bg-black/20 border border-[var(--border)]">
+              <div key={row.id} className="flex items-center justify-between p-2 rounded bg-black/20 border border-[var(--border)] clickable-card">
                 <div onClick={() => handleViewProject(row.id)} className="cursor-pointer min-w-0 flex-grow">
                   <div className="font-medium truncate">{row.title}</div>
                   <div className="text-xs text-[var(--muted)] truncate">{[row.client, row.location].filter(Boolean).join(' • ')}</div>
@@ -150,6 +151,8 @@ function DashboardComponent({ initialKpis, initialPendingAcct, initialProblems }
             <button onClick={addUpgrade} disabled={addingUpgrade} className="btn btn-primary">{addingUpgrade ? 'Adding…' : 'Add'}</button>
           </div>
         </section>
+        
+        {projects.length > 0 && <AddPhotoCard projects={projects} onPhotoAdded={loadEverything} />}
 
         <section className="card">
           <div className="p-3 border-b border-[var(--border)]">
@@ -162,7 +165,7 @@ function DashboardComponent({ initialKpis, initialPendingAcct, initialProblems }
             {boardLoading ? <ColumnsSkeleton /> : Object.entries(grouped).map(([col, rows]) => (
               <div key={col} className="card p-3 bg-black/30"><div className="font-semibold mb-2">{col} <span className="text-xs text-[var(--muted)]">({rows.length})</span></div><div className="grid gap-2 max-h-[360px] overflow-y-auto pr-1">
                 {rows.map(r => (
-                  <div key={r.id} onClick={() => handleViewProject(r.id)} className="cursor-pointer rounded bg-black/20 border border-[var(--border)] p-2 hover:bg-black/40">
+                  <div key={r.id} onClick={() => handleViewProject(r.id)} className="cursor-pointer rounded bg-black/20 border border-[var(--border)] p-2 hover:bg-black/40 clickable-card">
                     <div className="font-medium truncate">{r.title}</div>
                     <div className="text-xs text-[var(--muted)] truncate mt-1">
                       {r.client}
