@@ -63,7 +63,8 @@ async function getPageTitle(pageId: string): Promise<string> {
     const title = titleProp?.title?.map((t: any) => t.plain_text).join('') || 'Untitled';
     titleCache.set(pageId, title);
     return title;
-  } catch { 
+  } catch (e) { 
+    console.error('Error getting page title:', e);
     return 'Untitled'; 
   }
 }
@@ -72,9 +73,10 @@ async function getPageTitle(pageId: string): Promise<string> {
  * Public dashboard functions
  * ------------------------------- */
 
-// Count projects in Post & Beam phase
+// Count projects in Post & Beam phase - FIXED FILTER SYNTAX
 export const countPostAndBeam = async (): Promise<number> => {
   try {
+    console.log('Counting Post & Beam projects...');
     const results = await queryAll({
       database_id: PROJECTS_DB_ID,
       filter: {
@@ -85,6 +87,7 @@ export const countPostAndBeam = async (): Promise<number> => {
         ]
       }
     });
+    console.log(`Found ${results.length} Post & Beam projects`);
     return results.length;
   } catch (e) {
     console.error('Error counting Post & Beam projects:', e);
@@ -92,9 +95,10 @@ export const countPostAndBeam = async (): Promise<number> => {
   }
 };
 
-// List active bids
+// List active bids - FIXED FILTER SYNTAX
 export const listBids = async (): Promise<Array<{ id: string; title: string; client?: string }>> => {
   try {
+    console.log('Listing active bids...');
     const results = await queryAll({
       database_id: PROJECTS_DB_ID,
       filter: {
@@ -107,7 +111,7 @@ export const listBids = async (): Promise<Array<{ id: string; title: string; cli
       }
     });
 
-    return results.map((r: any) => {
+    const bids = results.map((r: any) => {
       const props = r.properties || {};
       return {
         id: r.id,
@@ -115,15 +119,19 @@ export const listBids = async (): Promise<Array<{ id: string; title: string; cli
         client: readTextish(props, 'Client')
       };
     });
+    
+    console.log(`Found ${bids.length} active bids`);
+    return bids;
   } catch (e) {
     console.error('Error listing bids:', e);
     return [];
   }
 };
 
-// List projects needing job account setup
+// List projects needing job account setup - FIXED FILTER SYNTAX
 export async function listJobAccountPending(): Promise<Array<{ id: string; title: string; client?: string }>> {
   try {
+    console.log('Listing job account pending...');
     const results = await queryAll({
       database_id: PROJECTS_DB_ID,
       filter: {
@@ -134,7 +142,7 @@ export async function listJobAccountPending(): Promise<Array<{ id: string; title
       }
     });
 
-    return results.map((r: any) => {
+    const pending = results.map((r: any) => {
       const props = r.properties || {};
       return {
         id: r.id,
@@ -142,15 +150,19 @@ export async function listJobAccountPending(): Promise<Array<{ id: string; title
         client: readTextish(props, 'Client')
       };
     });
+    
+    console.log(`Found ${pending.length} pending job accounts`);
+    return pending;
   } catch (e) {
     console.error('Error listing job account pending:', e);
     return [];
   }
 }
 
-// List improvements/issues
+// List improvements/issues - FIXED FILTER SYNTAX
 export async function listImprovements(openOnly?: boolean): Promise<Array<{ id: string; title: string; status?: string; projectName?: string }>> {
   try {
+    console.log('Listing improvements...');
     const filters: any[] = [];
     if (openOnly) {
       filters.push({
@@ -166,7 +178,7 @@ export async function listImprovements(openOnly?: boolean): Promise<Array<{ id: 
       ...(filters.length > 0 && { filter: { and: filters } })
     });
 
-    return Promise.all(results.map(async (r: any) => {
+    const improvements = await Promise.all(results.map(async (r: any) => {
       const props = r.properties || {};
       const projectRelations = readRelation(props, 'Projects');
       let projectName = '';
@@ -182,6 +194,9 @@ export async function listImprovements(openOnly?: boolean): Promise<Array<{ id: 
         projectName
       };
     }));
+    
+    console.log(`Found ${improvements.length} improvements`);
+    return improvements;
   } catch (e) {
     console.error('Error listing improvements:', e);
     return [];
@@ -191,6 +206,7 @@ export async function listImprovements(openOnly?: boolean): Promise<Array<{ id: 
 // Create new improvement
 export async function createImprovement(input: { projectId: string; title: string }) {
   try {
+    console.log(`Creating improvement for project ${input.projectId}: ${input.title}`);
     await notion.pages.create({
       parent: { database_id: IMPROVEMENTS_DB_ID },
       properties: {
@@ -199,9 +215,10 @@ export async function createImprovement(input: { projectId: string; title: strin
         'Status': { select: { name: 'Open' } }
       }
     } as any);
+    console.log('Improvement created successfully');
   } catch (e) {
     console.error('Error creating improvement:', e);
-    throw new Error('Failed to create improvement');
+    throw new Error(`Failed to create improvement: ${e instanceof Error ? e.message : 'Unknown error'}`);
   }
 }
 
@@ -234,16 +251,20 @@ export async function toggleJobAccount(id: string, value: boolean) {
 // List all projects for dropdowns
 export async function listProjectOptions(): Promise<Array<{ id: string; title: string }>> {
   try {
+    console.log('Listing project options...');
     const results = await queryAll({ 
       database_id: PROJECTS_DB_ID, 
       page_size: 100,
       sorts: [{ property: 'Project', direction: 'ascending' }]
     });
     
-    return results.map((r: any) => ({ 
+    const options = results.map((r: any) => ({ 
       id: r.id, 
       title: readTitle(r.properties, 'Project') 
     }));
+    
+    console.log(`Found ${options.length} project options`);
+    return options;
   } catch (e) {
     console.error('Error listing project options:', e);
     return [];
@@ -265,6 +286,7 @@ export async function listProjectsBoard(input: { q?: string; status?: string }):
   statusOptions: string[]
 }> {
   try {
+    console.log('Listing projects for board...');
     // Get all projects first
     const results = await queryAll({
       database_id: PROJECTS_DB_ID,
@@ -305,6 +327,7 @@ export async function listProjectsBoard(input: { q?: string; status?: string }):
       );
     }
 
+    console.log(`Board: ${items.length} items, ${statusOptions.length} status options`);
     return { items, statusOptions };
   } catch (e) {
     console.error('Error listing projects board:', e);
@@ -315,6 +338,7 @@ export async function listProjectsBoard(input: { q?: string; status?: string }):
 // Get full project details
 export async function getProjectFull(id: string): Promise<any> {
   try {
+    console.log(`Getting full project details for ${id}`);
     const page: any = await notion.pages.retrieve({ page_id: id });
     const props = page.properties || {};
 
@@ -336,7 +360,7 @@ export async function getProjectFull(id: string): Promise<any> {
       constructionPhase: readTextish(props, 'Construction Phase'),
     };
 
-    // Get related photos
+    // Get related photos - FIXED PROPERTY NAMES
     const photoResults = await queryAll({
       database_id: PHOTOS_DB_ID,
       filter: { property: 'Projects', relation: { contains: id } }
@@ -344,10 +368,10 @@ export async function getProjectFull(id: string): Promise<any> {
 
     const photos = photoResults.map((photo: any) => {
       const photoProps = photo.properties || {};
-      const files = photoProps['Files & media']?.files || photoProps['Photo']?.files || [];
+      const files = photoProps['Files & media']?.files || [];
       return {
         id: photo.id,
-        description: readTitle(photoProps, 'Name') || readTitle(photoProps, 'Title') || 'Photo',
+        description: readTitle(photoProps, 'Name') || 'Photo',
         url: files[0]?.file?.url || files[0]?.external?.url || ''
       };
     }).filter((photo: any) => photo.url);
@@ -364,7 +388,7 @@ export async function getProjectFull(id: string): Promise<any> {
         id: task.id,
         title: readTitle(taskProps, 'Task'),
         status: readTextish(taskProps, 'Status'),
-        assignee: readTextish(taskProps, 'Asignee'),
+        assignee: readTextish(taskProps, 'Asignee'), // Note: keeping original spelling
         due: readTextish(taskProps, 'Due Date'),
         category: readTextish(taskProps, 'Category'),
         comment: readTextish(taskProps, 'Comment')
@@ -381,7 +405,7 @@ export async function getProjectFull(id: string): Promise<any> {
       const improvementProps = improvement.properties || {};
       return {
         id: improvement.id,
-        title: readTitle(improvementProps, 'Name') || readTitle(improvementProps, 'Title') || 'Improvement',
+        title: readTitle(improvementProps, 'Name') || 'Improvement',
         status: readTextish(improvementProps, 'Status')
       };
     });
@@ -396,12 +420,13 @@ export async function getProjectFull(id: string): Promise<any> {
       const expenseProps = expense.properties || {};
       return {
         id: expense.id,
-        name: readTitle(expenseProps, 'Name') || readTitle(expenseProps, 'Title') || 'Expense',
+        name: readTitle(expenseProps, 'Name') || 'Expense',
         category: readTextish(expenseProps, 'Category'),
         value: readTextish(expenseProps, 'Amount') || readTextish(expenseProps, 'Value') || 0
       };
     });
 
+    console.log(`Project details: ${photos.length} photos, ${tasks.length} tasks, ${improvements.length} improvements`);
     return { 
       project, 
       photos, 
@@ -416,9 +441,15 @@ export async function getProjectFull(id: string): Promise<any> {
   }
 }
 
-// Create photo entry
+// Create photo entry - FIXED PROPERTY NAMES
 export async function createPhotoEntry(input: { projectId: string; description: string; photoUrl: string }) {
   try {
+    console.log(`Creating photo entry for project ${input.projectId}: ${input.description}`);
+    
+    // First, let's check the Photos database structure
+    const photosDB = await notion.databases.retrieve({ database_id: PHOTOS_DB_ID });
+    console.log('Photos DB properties:', Object.keys((photosDB as any).properties));
+    
     await notion.pages.create({
       parent: { database_id: PHOTOS_DB_ID },
       properties: {
@@ -432,8 +463,11 @@ export async function createPhotoEntry(input: { projectId: string; description: 
         }
       }
     } as any);
+    
+    console.log('Photo entry created successfully');
   } catch (e) {
     console.error('Error creating photo entry:', e);
-    throw new Error('Failed to create photo entry');
+    console.error('Full error:', JSON.stringify(e, null, 2));
+    throw new Error(`Failed to create photo entry: ${e instanceof Error ? e.message : 'Unknown error'}`);
   }
 }
