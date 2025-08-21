@@ -1,6 +1,7 @@
 'use client';
 
 import { Suspense, useEffect, useMemo, useState } from 'react';
+import ProjectDetailPanel from '@/components/ProjectDetailPanel';
 import { 
   Plus, Camera, CheckCircle2, Search, User, Building, MapPin, 
   DollarSign, Clock, TrendingUp, AlertCircle, CheckSquare,
@@ -945,21 +946,7 @@ const ProjectCard = ({ project, phase, biddingStatus, onProjectClick, onBiddingS
   );
 };
 
-// Simple placeholder for ProjectDetailPanel
-const ProjectDetailPanel = ({ projectId, onClose }: { projectId: string; onClose: () => void }) => (
-  <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-    <div className="bg-slate-900 rounded-xl p-6 max-w-md w-full">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-bold text-white">Project Details</h2>
-        <button onClick={onClose} className="text-slate-400 hover:text-white">
-          <X className="h-6 w-6" />
-        </button>
-      </div>
-      <p className="text-slate-400">Project ID: {projectId}</p>
-      <p className="text-sm text-slate-500 mt-2">Full project detail panel coming soon...</p>
-    </div>
-  </div>
-);
+
 
 export default function OperationsDashboard(props: { 
   initialKpis: KPI; 
@@ -977,4 +964,4 @@ export default function OperationsDashboard(props: {
       <DashboardComponent {...props} />
     </Suspense>
   );
-}
+}}
