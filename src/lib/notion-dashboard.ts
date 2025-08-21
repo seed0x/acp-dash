@@ -521,12 +521,31 @@ export async function getProjectFull(id: string): Promise<{
     listRelated(DOCS_DB_ID),
   ]);
 
-  const improvements = impRows.map((r: any) => ({ id: r.id, title: readTitle(r.properties, Object.keys(r.properties).find(k => r.properties[k].type === 'title')!), status: readTextish(r.properties, Object.keys(r.properties).find(k => ['status', 'select'].includes(r.properties[k].type))) }));
-  const tasks = taskRows.map((r: any) => ({ id: r.id, title: readTitle(r.properties, Object.keys(r.properties).find(k => r.properties[k].type === 'title')!), status: readTextish(r.properties, Object.keys(r.properties).find(k => ['status', 'select'].includes(r.properties[k].type))), assignee: r.properties[Object.keys(r.properties).find(k => r.properties[k].type === 'people')]?.people?.[0]?.name, due: r.properties[Object.keys(r.properties).find(k => r.properties[k].type === 'date')]?.date?.start }));
-  const expenses = expRows.map((r: any) => ({ id: r.id, name: readTitle(r.properties, Object.keys(r.properties).find(k => r.properties[k].type === 'title')!), category: readTextish(r.properties, Object.keys(r.properties).find(k => r.properties[k].type === 'select')), value: readNumber(r.properties, Object.keys(r.properties).find(k => r.properties[k].type === 'number')) }));
-  const time = timeRows.map((r: any) => ({ id: r.id, name: readTitle(r.properties, Object.keys(r.properties).find(k => r.properties[k].type === 'title')!), person: r.properties[Object.keys(r.properties).find(k => r.properties[k].type === 'people')]?.people?.[0]?.name, date: r.properties[Object.keys(r.properties).find(k => r.properties[k].type === 'date')]?.date?.start, hours: readNumber(r.properties, Object.keys(r.properties).find(k => r.properties[k].type === 'number')) }));
-  const notes = noteRows.map((r: any) => ({ id: r.id, title: readTitle(r.properties, Object.keys(r.properties).find(k => r.properties[k].type === 'title')!), created: r.properties[Object.keys(r.properties).find(k => r.properties[k].type === 'created_time')]?.created_time }));
-  const docs = docRows.map((r: any) => ({ id: r.id, title: readTitle(r.properties, Object.keys(r.properties).find(k => r.properties[k].type === 'title')!), description: readTextish(r.properties, Object.keys(r.properties).find(k => r.properties[k].type === 'rich_text')) }));
+  const mapRelated = (rows: any[], typeMap: Record<string, string>) => {
+    return rows.map((r) => {
+      const p = r.properties || {};
+      const item: any = { id: r.id };
+      for (const [key, type] of Object.entries(typeMap)) {
+        const propKey = Object.keys(p).find(k => p[k].type === type);
+        if (propKey) {
+          if (type === 'title') item[key] = readTitle(p, propKey);
+          else if (type === 'number') item[key] = readNumber(p, propKey);
+          else if (type === 'people') item[key] = p[propKey]?.people?.[0]?.name;
+          else if (type === 'date') item[key] = p[propKey]?.date?.start;
+          else if (type === 'created_time') item[key] = p[propKey]?.created_time;
+          else item[key] = readTextish(p, propKey);
+        }
+      }
+      return item;
+    });
+  }
+
+  const improvements = mapRelated(impRows, { title: 'title', status: 'status' });
+  const tasks = mapRelated(taskRows, { title: 'title', status: 'status', assignee: 'people', due: 'date' });
+  const expenses = mapRelated(expRows, { name: 'title', category: 'select', value: 'number' });
+  const time = mapRelated(timeRows, { name: 'title', person: 'people', date: 'date', hours: 'number' });
+  const notes = mapRelated(noteRows, { title: 'title', created: 'created_time' });
+  const docs = mapRelated(docRows, { title: 'title', description: 'rich_text' });
 
   const totalExpenses = expenses.reduce((s, e) => s + (e.value || 0), 0)
   const totalHours = time.reduce((s, t) => s + (t.hours || 0), 0)
