@@ -79,12 +79,6 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: { initialKpis: 
   useEffect(() => { loadData(); }, []);
   useEffect(() => { loadBoard(); }, [loadBoard]);
 
-  const grouped = useMemo(() => boardItems.reduce((acc, it) => {
-    const col = it.status || 'Uncategorized';
-    (acc[col] ||= []).push(it);
-    return acc;
-  }, {} as Record<string, BoardItem[]>), [boardItems]);
-
   const handleActionSubmit = async (type: 'photo' | 'upgrade') => {
     if (!actionProjectId) return;
     setIsSubmitting(true);
@@ -101,7 +95,7 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: { initialKpis: 
         await fetch('/api/improvements', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId: actionProjectId, title: upgradeTitle }) });
         setUpgradeTitle('');
       }
-      await loadData(); // Refresh KPIs on success
+      await loadData();
     } catch (e: any) { setError(e.message) }
     finally { setIsSubmitting(false) }
   };
@@ -126,15 +120,8 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: { initialKpis: 
             </div>
             <div className="flex-grow h-[calc(100vh-12rem)] overflow-y-auto pr-2">
               {boardLoading ? <div className="card h-full w-full skeleton" /> :
-                <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-                  {Object.entries(grouped).map(([col, rows]) => (
-                    <div key={col} className="space-y-4">
-                      <h3 className="font-semibold px-1">{col} <span className="text-sm text-muted-foreground">({rows.length})</span></h3>
-                      <div className="space-y-4">
-                        {rows.map(r => <ProjectCard key={r.id} project={r} onClick={() => handleViewProject(r.id)} />)}
-                      </div>
-                    </div>
-                  ))}
+                <div className="space-y-4">
+                  {boardItems.map(item => <ProjectCard key={item.id} project={item} onClick={() => handleViewProject(item.id)} />)}
                 </div>
               }
             </div>
@@ -193,12 +180,16 @@ const ActionCard = ({ icon: Icon, title, children }: { icon: React.ElementType, 
 );
 
 const ProjectCard = ({ project, onClick }: { project: BoardItem, onClick: () => void }) => (
-  <div onClick={onClick} className="card p-4 space-y-3 cursor-pointer transition-transform hover:scale-105 hover:shadow-lg">
-    <p className="font-bold truncate">{project.title}</p>
-    <div className="text-sm text-muted-foreground space-y-2">
-      {project.client && <div className="flex items-center gap-2"><User className="h-4 w-4" /><p className="truncate">{project.client}</p></div>}
-      {project.builder && <div className="flex items-center gap-2"><Building className="h-4 w-4" /><p className="truncate">{project.builder}</p></div>}
-      {project.location && <div className="flex items-center gap-2"><MapPin className="h-4 w-4 text-blue-400" /><p className="truncate text-blue-400">{project.location}</p></div>}
+  <div onClick={onClick} className="card p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 cursor-pointer transition-all hover:border-primary/80 hover:shadow-lg">
+    <div className="min-w-0">
+      <p className="font-bold truncate text-lg">{project.title}</p>
+      <div className="flex items-center gap-4 text-sm text-muted-foreground mt-2">
+        {project.client && <div className="flex items-center gap-2"><User className="h-4 w-4" /><p className="truncate">{project.client}</p></div>}
+        {project.builder && <div className="flex items-center gap-2"><Building className="h-4 w-4" /><p className="truncate">{project.builder}</p></div>}
+      </div>
+    </div>
+    <div className="flex-shrink-0">
+        <span className="inline-block bg-secondary text-secondary-foreground text-xs font-semibold px-2.5 py-1 rounded-full">{project.status || 'No Status'}</span>
     </div>
   </div>
 );
