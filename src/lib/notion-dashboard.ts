@@ -528,4 +528,227 @@ export async function createPhotoEntry(input: {
     console.error('Error creating photo entry:', e);
     throw new Error(`Failed to create photo entry: ${e instanceof Error ? e.message : 'Unknown error'}`);
   }
+}// ...existing code...
+const readRelation = (p: any, key: string) => {
+  if (!p[key] || p[key].type !== 'relation') return [];
+  return p[key].relation || [];
+};
+
+const queryAll = async (opts: any) => {
+  let results: any[] = [];
+  let next_cursor: string | undefined = undefined;
+  do {
+    const res: any = await notion.databases.query({ ...opts, start_cursor: next_cursor });
+    results = results.concat(res.results);
+    next_cursor = res.next_cursor;
+  } while (next_cursor);
+  return results;
+};
+
+// Get page title helper
+const titleCache = new Map<string, string>();
+async function getPageTitle(pageId: string): Promise<string> {
+  if (titleCache.has(pageId)) return titleCache.get(pageId)!;
+  try {
+    const page = await notion.pages.retrieve({ page_id: pageId }) as any;
+    const props = page.properties || {};
+    const titleProp = Object.values(props).find((p: any) => p?.type === 'title') as any;
+    const title = titleProp?.title?.map((t: any) => t.plain_text).join('') || 'Untitled';
+    titleCache.set(pageId, title);
+    return title;
+  } catch (e) { 
+    console.error('Error getting page title:', e);
+    return 'Untitled'; 
+  }
 }
+
+// New helpers for interacting with tasks and comments
+
+// List tasks for a given project by relation to TASKS_DB_ID
+export async function listTasksForProject(projectId: string): Promise<Array<{
+  id: string;
+  title: string;
+  completed?: boolean;
+  assignee?: string;
+  dueDate?: string;
+}>> {
+  try {
+    // Try to find a relation property name automatically by querying the DB schema (best-effort)
+    const db = await notion.databases.retrieve({ database_id: TASKS_DB_ID }) as any;
+    const relationPropName = Object.entries(db.properties || {}).find(([, v]: any) => v.type === 'relation')?.[0];
+
+    // Build filter: relation contains the projectId if relation property exists, otherwise return empty
+    const filter = relationPropName
+      ? { property: relationPropName, relation: { contains: projectId } }
+      : { property: 'Project', relation: { contains: projectId } };
+
+    const results = await queryAll({
+      database_id: TASKS_DB_ID,
+      filter
+    });
+
+    return results.map((r: any) => {
+      const props = r.properties || {};
+      const titleProp = Object.values(props).find((p: any) => p.type === 'title') as any;
+      const title = titleProp?.title?.map((t: any) => t.plain_text).join('') || 'Untitled';
+      const checkboxProp = Object.entries(props).find(([, v]: any) => v.type === 'checkbox')?.[0];
+      const peopleProp = Object.entries(props).find(([, v]: any) => v.type === 'people')?.[0];
+      const dateProp = Object.entries(props).find(([, v]: any) => v.type === 'date')?.[0];
+
+      return {
+        id: r.id,
+        title,
+        completed: checkboxProp ? props[checkboxProp].checkbox : false,
+        assignee: peopleProp ? (props[peopleProp].people?.[0]?.name || props[peopleProp].people?.[0]?.id) : undefined,
+        dueDate: dateProp ? props[dateProp].date?.start : undefined
+      };
+    });
+  } catch (e) {
+    console.error('Error listing tasks for project:', e);
+    return [];
+  }
+}
+
+// Toggle task completion checkbox (auto-detects checkbox property)
+export async function toggleTaskComplete(taskId: string, value: boolean) {
+  try {
+    const page = await notion.pages.retrieve({ page_id: taskId }) as any;
+    const props = page.properties || {};
+    const checkboxPropName = Object.entries(props).find(([, v]: any) => v.type === 'checkbox')?.[0];
+
+    if (!checkboxPropName) {
+      throw new Error('No checkbox property found on task page.');
+    }
+
+    await notion.pages.update({
+      page_id: taskId,
+      properties: {
+        [checkboxPropName]: { checkbox: value }
+      }
+    });
+    return true;
+  } catch (e) {
+    console.error('Error toggling task complete:', e);
+    return false;
+  }
+}
+
+// Get detailed issue (improvement) view with related notes/comments and project title
+export async function getIssueDetails(issueId: string): Promise<any> {
+  try {
+    const page = await notion.pages.retrieve({ page_id: issueId }) as any;
+    const props = page.properties || {};
+
+    // Extract common fields
+    const titleProp = Object.values(props).find((p: any) => p.type === 'title') as any;
+    const title = titleProp?.title?.map((t: any) => t.plain_text).join('') || 'Untitled';
+    const descProp = Object.values(props).find((p: any) => p.type === 'rich_text') as any;
+    const description = descProp?.rich_text?.map((t: any) => t.plain_text).join('') || '';
+    const statusPropName = Object.entries(props).find(([, v]: any) => v.type === 'status')?.[0];
+    const status = statusPropName ? props[statusPropName].status?.name : undefined;
+    const relationPropName = Object.entries(props).find(([, v]: any) => v.type === 'relation')?.[0];
+    const projectRelation = relationPropName ? (props[relationPropName].relation?.[0]?.id) : undefined;
+
+    // Try to fetch related notes by querying NOTES_DB_ID for a relation that contains this issue id.
+    let notes: Array<{ id: string; title: string; text?: string; created_time?: string }> = [];
+    try {
+      // Best-effort: common relation property names to try
+      const relationCandidates = ['Related', 'Issue', 'Improvement', 'Parent', 'Related To'];
+      for (const rel of relationCandidates) {
+        try {
+          const res = await queryAll({
+            database_id: NOTES_DB_ID,
+            filter: { property: rel, relation: { contains: issueId } }
+          });
+          if (res.length) {
+            notes = res.map((n: any) => {
+              const p = n.properties || {};
+              const t = Object.values(p).find((pp: any) => pp.type === 'title') as any;
+              const text = Object.values(p).find((pp: any) => pp.type === 'rich_text') as any;
+              return {
+                id: n.id,
+                title: t?.title?.map((x: any) => x.plain_text).join('') || 'Note',
+                text: text?.rich_text?.map((x: any) => x.plain_text).join('') || undefined,
+                created_time: n.created_time
+              };
+            });
+            break;
+          }
+        } catch {
+          // ignore and try next candidate
+        }
+      }
+    } catch (e) {
+      console.warn('Could not query notes for issue:', e);
+    }
+
+    const projectName = projectRelation ? await getPageTitle(projectRelation) : undefined;
+
+    return {
+      id: issueId,
+      title,
+      description,
+      status,
+      projectId: projectRelation,
+      projectName,
+      notes
+    };
+  } catch (e) {
+    console.error('Error getting issue details:', e);
+    return null;
+  }
+}
+
+// Create a comment/note attached to a page. Prefer Notion Comments API if available,
+// otherwise create a record in NOTES_DB_ID and try to set a relation back to the page.
+export async function createCommentOnPage(pageId: string, content: string) {
+  try {
+    // Try official comments API first (may not be enabled or present in older SDKs)
+    try {
+      const commentsApi = (notion as any).comments;
+      if (commentsApi && typeof commentsApi.create === 'function') {
+        await (notion as any).comments.create({
+          parent: { page_id: pageId },
+          rich_text: [{ type: 'text', text: { content } }]
+        });
+        return true;
+      }
+    } catch (e) {
+      // fallthrough to creating a note
+    }
+
+    // Fallback: create a simple note in NOTES_DB_ID and attach a relation to the page if possible
+    const db = await notion.databases.retrieve({ database_id: NOTES_DB_ID }) as any;
+    const relPropName = Object.entries(db.properties || {}).find(([, v]: any) => v.type === 'relation')?.[0];
+
+    // Build properties for the created note: title (first N chars) and relation if available
+    const titleText = content.slice(0, 60) || 'Comment';
+    const properties: any = {
+      Title: { title: [{ text: { content: titleText } }] }
+    };
+
+    if (relPropName) {
+      properties[relPropName] = { relation: [{ id: pageId }] };
+    } else {
+      // Also try common names
+      properties['Related'] = { relation: [{ id: pageId }] };
+    }
+
+    // Add a body field if exists in schema
+    const richTextProp = Object.entries(db.properties || {}).find(([, v]: any) => v.type === 'rich_text')?.[0];
+    if (richTextProp) {
+      properties[richTextProp] = { rich_text: [{ type: 'text', text: { content } }] };
+    }
+
+    await notion.pages.create({
+      parent: { database_id: NOTES_DB_ID },
+      properties
+    });
+
+    return true;
+  } catch (e) {
+    console.error('Error creating comment on page:', e);
+    return false;
+  }
+}
+// ...existing code...
