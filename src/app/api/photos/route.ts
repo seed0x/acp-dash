@@ -1,7 +1,7 @@
 // src/app/api/photos/route.ts
 import { NextResponse } from 'next/server';
 import { put } from '@vercel/blob';
-import { createPhotoEntry } from '@/lib/notion-dashboard';
+import { notion, PHOTOS_DB_ID } from '@/lib/notion-dashboard';
 
 export async function POST(req: Request) {
   try {
@@ -9,11 +9,13 @@ export async function POST(req: Request) {
     const file = formData.get('file') as File | null;
     const projectId = formData.get('projectId') as string;
     const description = formData.get('description') as string;
+    const date = formData.get('date') as string || new Date().toISOString().split('T')[0];
 
     console.log('Photo upload request:', { 
       hasFile: !!file, 
       projectId, 
       description,
+      date,
       fileName: file?.name 
     });
 
@@ -36,15 +38,24 @@ export async function POST(req: Request) {
     });
     console.log('Blob upload successful:', blob.url);
 
-    // Create an entry in the Notion Photos database
-    console.log('Creating Notion photo entry...');
-    await createPhotoEntry({
-      projectId,
-      description: description || file.name,
-      photoUrl: blob.url,
-    });
+    // Create an entry in the Notion Photos database with date
+    console.log('Creating Notion photo entry with date...');
+    await notion.pages.create({
+      parent: { database_id: PHOTOS_DB_ID },
+      properties: {
+        'Name': { title: [{ text: { content: description || file.name } }] },
+        'Projects': { relation: [{ id: projectId }] },
+        'Date': { date: { start: date } }, // Add date field
+        'Photo': { 
+          files: [{ 
+            name: description || file.name,
+            external: { url: blob.url } 
+          }] 
+        }
+      }
+    } as any);
 
-    console.log('Photo entry created successfully');
+    console.log('Photo entry created successfully with date');
 
     return NextResponse.json({ 
       ok: true, 

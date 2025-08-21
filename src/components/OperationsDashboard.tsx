@@ -5,9 +5,9 @@ import {
   Plus, Camera, CheckCircle2, Search, User, Building, MapPin, 
   DollarSign, Clock, TrendingUp, AlertCircle, CheckSquare,
   Filter, Calendar, Phone, Mail, ExternalLink, Star,
-  Hammer, Wrench, PaintBucket, FileText, CreditCard, Upload, X
+  Hammer, Wrench, PaintBucket, FileText, CreditCard, Upload, X,
+  Edit3, Save, RotateCcw, Eye, MessageSquare, PhoneCall, Trophy, AlertTriangle
 } from 'lucide-react';
-// ProjectDetailPanel component will be defined inline below
 
 // Type definitions
 type KPI = { 
@@ -115,6 +115,7 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: {
   const [kpis, setKpis] = useState(initialKpis);
   const [pendingAcct, setPendingAcct] = useState(initialPendingAcct);
   const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const [searchInput, setSearchInput] = useState('');
   const [query, setQuery] = useState('');
@@ -130,12 +131,23 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: {
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoDescription, setPhotoDescription] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [showPhotoUpload, setShowPhotoUpload] = useState(false);
+
+  // UI states
+  const [editingProject, setEditingProject] = useState<string | null>(null);
+  const [editingStatus, setEditingStatus] = useState<string>('');
 
   useEffect(() => {
     const t = setTimeout(() => setQuery(searchInput.trim()), 400);
     return () => clearTimeout(t);
   }, [searchInput]);
+
+  // Clear success message after 3 seconds
+  useEffect(() => {
+    if (successMessage) {
+      const timer = setTimeout(() => setSuccessMessage(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [successMessage]);
 
   const loadData = async () => {
     try {
@@ -164,12 +176,11 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: {
       const data = await fetchJSON<{ items: BoardItem[]; statusOptions: string[] }>(`/api/projects/board?${qs}`);
       setBoardItems(data.items || []);
       if (data.statusOptions && data.statusOptions.length > 0) {
-        // Don't override if we already have status options
         setStatusOptions(prev => prev.length > 1 ? prev : ['All', ...data.statusOptions]);
       }
     } catch (e: any) { 
       setError(`Failed to load projects: ${e.message}`);
-      setBoardItems([]); // Clear items on error
+      setBoardItems([]);
     } finally { 
       setBoardLoading(false);
     }
@@ -192,7 +203,7 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: {
     return groups;
   }, [boardItems, selectedPhase]);
 
-  const handleActionSubmit = async (type: 'photo' | 'upgrade') => {
+  const handleQuickAction = async (type: 'photo' | 'upgrade') => {
     if (!actionProjectId) {
       setError('Please select a project first');
       return;
@@ -204,7 +215,7 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: {
     }
     
     if (type === 'upgrade' && !upgradeTitle.trim()) {
-      setError('Please enter an improvement description');
+      setError('Please enter an issue description');
       return;
     }
 
@@ -217,6 +228,7 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: {
         formData.append('file', photoFile);
         formData.append('projectId', actionProjectId);
         formData.append('description', photoDescription.trim() || photoFile.name);
+        formData.append('date', new Date().toISOString().split('T')[0]); // Add current date
         
         const response = await fetch('/api/photos', { method: 'POST', body: formData });
         const result = await response.json();
@@ -228,13 +240,11 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: {
         // Success - reset form
         setPhotoFile(null); 
         setPhotoDescription('');
-        setShowPhotoUpload(false);
         const fileInput = document.getElementById('photo-file-input') as HTMLInputElement;
         if (fileInput) fileInput.value = '';
         
-        // Show success message briefly
-        const successMessage = `Photo uploaded successfully to ${projects.find(p => p.id === actionProjectId)?.title}`;
-        setError(null);
+        const projectName = projects.find(p => p.id === actionProjectId)?.title;
+        setSuccessMessage(`Photo uploaded to ${projectName}`);
         
       } else if (type === 'upgrade' && upgradeTitle.trim()) {
         const response = await fetch('/api/improvements', { 
@@ -242,21 +252,20 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: {
           headers: { 'Content-Type': 'application/json' }, 
           body: JSON.stringify({ 
             projectId: actionProjectId, 
-            title: upgradeTitle.trim() 
+            title: upgradeTitle.trim()
           }) 
         });
         const result = await response.json();
         
         if (!response.ok) {
-          throw new Error(result.error || 'Failed to add improvement');
+          throw new Error(result.error || 'Failed to add issue');
         }
         
         // Success - reset form
         setUpgradeTitle('');
         
-        // Show success message briefly
-        const successMessage = `Improvement added to ${projects.find(p => p.id === actionProjectId)?.title}`;
-        setError(null);
+        const projectName = projects.find(p => p.id === actionProjectId)?.title;
+        setSuccessMessage(`Issue added to ${projectName}`);
       }
       
       // Reload data to reflect changes
@@ -265,6 +274,28 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: {
       setError(e.message || 'An unexpected error occurred');
     } finally { 
       setIsSubmitting(false);
+    }
+  };
+
+  const handleStatusUpdate = async (projectId: string, newStatus: string) => {
+    try {
+      setError(null);
+      const response = await fetch(`/api/projects/${projectId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus })
+      });
+      
+      if (!response.ok) {
+        const result = await response.json();
+        throw new Error(result.error || 'Failed to update status');
+      }
+      
+      setSuccessMessage('Status updated successfully');
+      await loadBoard();
+      setEditingProject(null);
+    } catch (e: any) {
+      setError(e.message);
     }
   };
 
@@ -306,11 +337,12 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: {
               color="text-purple-400"
             />
             <KPICard 
-              icon={AlertCircle} 
-              label="Pending Accounts" 
+              icon={AlertTriangle} 
+              label="Pending Setup" 
               value={kpis.jobAccountsPending} 
               trend="-2" 
               color="text-yellow-400"
+              subtitle="Job accounts needing setup"
             />
             <KPICard 
               icon={CheckCircle2} 
@@ -323,11 +355,31 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: {
         </div>
       </div>
 
-      {error && (
-        <div className="max-w-7xl mx-auto px-4 pt-6">
-          <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-lg">
-            {error}
-          </div>
+      {/* Success/Error Messages */}
+      {(error || successMessage) && (
+        <div className="max-w-7xl mx-auto px-4 pt-4">
+          {error && (
+            <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-lg flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <AlertCircle className="h-5 w-5" />
+                <span>{error}</span>
+              </div>
+              <button onClick={() => setError(null)} className="text-red-400 hover:text-red-300">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          )}
+          {successMessage && (
+            <div className="bg-green-500/10 border border-green-500/20 text-green-400 p-4 rounded-lg flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <CheckCircle2 className="h-5 w-5" />
+                <span>{successMessage}</span>
+              </div>
+              <button onClick={() => setSuccessMessage(null)} className="text-green-400 hover:text-green-300">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -335,29 +387,89 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: {
         <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
           {/* Main Content */}
           <div className="xl:col-span-3 space-y-6">
-            {/* Search and Filters */}
-            <div className="bg-slate-900/50 backdrop-blur-xl border border-slate-800 rounded-xl p-6">
-              <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between">
+            {/* Mobile Photo Upload - At Top for iPhone */}
+            <div className="xl:hidden">
+              <div className="bg-gradient-to-r from-blue-600/20 to-purple-600/20 border border-blue-500/20 rounded-2xl p-6">
+                <div className="flex items-center gap-3 mb-4">
+                  <Camera className="h-6 w-6 text-blue-400" />
+                  <h3 className="font-semibold text-slate-100">Quick Photo Upload</h3>
+                </div>
+                <div className="space-y-4">
+                  <select 
+                    value={actionProjectId} 
+                    onChange={e => setActionProjectId(e.target.value)} 
+                    className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100"
+                  >
+                    <option value="">Choose a lot...</option>
+                    {projects.map(p => (
+                      <option key={p.id} value={p.id}>{p.title}</option>
+                    ))}
+                  </select>
+                  <input 
+                    id="photo-file-input"
+                    type="file" 
+                    accept="image/*" 
+                    onChange={e => setPhotoFile(e.target.files?.[0] || null)}
+                    className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-blue-600 file:text-white file:cursor-pointer"
+                  />
+                  <input 
+                    value={photoDescription} 
+                    onChange={e => setPhotoDescription(e.target.value)} 
+                    placeholder="What's happening in this photo?"
+                    className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-400"
+                  />
+                  <button 
+                    onClick={() => handleQuickAction('photo')} 
+                    disabled={isSubmitting || !photoFile || !actionProjectId}
+                    className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 disabled:from-slate-700 disabled:to-slate-600 text-white py-3 px-6 rounded-xl font-medium transition-all flex items-center justify-center gap-2"
+                  >
+                    {isSubmitting ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        Uploading...
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="h-5 w-5" />
+                        Upload Photo
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Enhanced Search - FIXED UI */}
+            <div className="bg-gradient-to-r from-slate-900/80 to-slate-800/80 backdrop-blur-xl border border-slate-700 rounded-2xl p-6 shadow-2xl">
+              <div className="flex flex-col lg:flex-row gap-6 items-start lg:items-center justify-between">
                 <div className="flex-1 w-full lg:max-w-md">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
+                  <div className="relative group">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400 group-focus-within:text-blue-400 transition-colors duration-200" />
                     <input
                       value={searchInput}
                       onChange={e => setSearchInput(e.target.value)}
                       placeholder="Search projects, clients, locations..."
-                      className="w-full pl-10 pr-4 py-3 bg-slate-800/50 border border-slate-700 rounded-lg text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      className="w-full pl-12 pr-12 py-4 bg-slate-800/60 border border-slate-600 rounded-xl text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 shadow-inner"
                     />
+                    {searchInput && (
+                      <button
+                        onClick={() => setSearchInput('')}
+                        className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 transition-colors"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    )}
                   </div>
                 </div>
                 
-                {/* Phase Filter Pills */}
-                <div className="flex flex-wrap gap-2">
+                {/* Phase Filter Pills - IMPROVED */}
+                <div className="flex flex-wrap gap-3">
                   <button
                     onClick={() => setSelectedPhase('all')}
-                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                    className={`px-5 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 ${
                       selectedPhase === 'all'
-                        ? 'bg-blue-500 text-white shadow-lg'
-                        : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                        ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-lg shadow-blue-500/25'
+                        : 'bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-slate-100'
                     }`}
                   >
                     All ({totalProjects})
@@ -366,10 +478,10 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: {
                     <button
                       key={phase.key}
                       onClick={() => setSelectedPhase(phase.key)}
-                      className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
+                      className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 flex items-center gap-2 ${
                         selectedPhase === phase.key
-                          ? `${phase.color} text-white`
-                          : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                          ? `${phase.color} border shadow-lg`
+                          : 'bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-slate-100'
                       }`}
                     >
                       <phase.icon className="h-4 w-4" />
@@ -380,8 +492,8 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: {
               </div>
             </div>
 
-            {/* Projects by Phase - Scrollable Containers */}
-            <div className="space-y-6">
+            {/* Projects by Phase */}
+            <div className="space-y-8">
               {boardLoading ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {[...Array(6)].map((_, i) => (
@@ -389,18 +501,15 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: {
                   ))}
                 </div>
               ) : boardItems.length === 0 ? (
-                <div className="text-center py-16 bg-slate-900/30 rounded-xl border border-slate-800">
+                <div className="text-center py-16 bg-slate-900/30 rounded-2xl border border-slate-800">
                   <Building className="h-16 w-16 text-slate-400 mx-auto mb-4" />
                   <h3 className="text-xl font-semibold text-slate-100 mb-2">No Projects Found</h3>
                   <p className="text-slate-400 mb-4">
-                    {query ? `No projects match "${query}"` : 'No projects in your Notion database yet'}
-                  </p>
-                  <p className="text-sm text-slate-500">
-                    {query ? 'Try adjusting your search terms' : 'Add projects to your Notion database to see them here'}
+                    {query ? `No projects match "${query}"` : 'No projects in your database yet'}
                   </p>
                 </div>
               ) : selectedPhase === 'all' ? (
-                // Show by phases when "all" is selected
+                // Show all phases with dedicated sections
                 PIPELINE_PHASES.map(phase => {
                   const projects = groupedProjects[phase.key];
                   if (projects.length === 0) return null;
@@ -411,6 +520,12 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: {
                       phase={phase}
                       projects={projects}
                       onProjectClick={handleViewProject}
+                      onStatusUpdate={handleStatusUpdate}
+                      editingProject={editingProject}
+                      setEditingProject={setEditingProject}
+                      editingStatus={editingStatus}
+                      setEditingStatus={setEditingStatus}
+                      statusOptions={statusOptions}
                     />
                   );
                 })
@@ -422,6 +537,12 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: {
                       phase={PIPELINE_PHASES.find(p => p.key === selectedPhase)!}
                       projects={groupedProjects[selectedPhase]}
                       onProjectClick={handleViewProject}
+                      onStatusUpdate={handleStatusUpdate}
+                      editingProject={editingProject}
+                      setEditingProject={setEditingProject}
+                      editingStatus={editingStatus}
+                      setEditingStatus={setEditingStatus}
+                      statusOptions={statusOptions}
                       hideHeader
                     />
                   ) : (
@@ -435,103 +556,21 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: {
             </div>
           </div>
 
-          {/* Sidebar */}
-          <div className="space-y-6">
-            {/* Mobile-First Photo Upload */}
+          {/* Desktop Sidebar */}
+          <div className="hidden xl:block space-y-6">
+            {/* Photo Upload */}
             <div className="bg-slate-900/50 backdrop-blur-xl border border-slate-800 rounded-xl overflow-hidden">
-              <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <Camera className="h-5 w-5 text-slate-300" />
-                  <h3 className="font-semibold text-slate-100">Photo Upload</h3>
-                </div>
-                <button
-                  onClick={() => setShowPhotoUpload(!showPhotoUpload)}
-                  className="text-slate-400 hover:text-slate-100 transition-colors"
-                >
-                  {showPhotoUpload ? <X className="h-5 w-5" /> : <Plus className="h-5 w-5" />}
-                </button>
+              <div className="p-4 border-b border-slate-800 flex items-center gap-3">
+                <Camera className="h-5 w-5 text-slate-300" />
+                <h3 className="font-semibold text-slate-100">Photo Upload</h3>
               </div>
-              
-              {showPhotoUpload && (
-                <div className="p-4 space-y-4">
-                  {/* Project Selection */}
-                  <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-2">Select Lot</label>
-                    <select 
-                      value={actionProjectId} 
-                      onChange={e => setActionProjectId(e.target.value)} 
-                      className="w-full px-3 py-3 bg-slate-800 border border-slate-700 rounded-lg text-slate-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    >
-                      <option value="">Choose a lot...</option>
-                      {projects.map(p => (
-                        <option key={p.id} value={p.id}>{p.title}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {/* File Upload */}
-                  <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-2">Photo</label>
-                    <div className="relative">
-                      <input 
-                        id="photo-file-input"
-                        type="file" 
-                        accept="image/*" 
-                        onChange={e => setPhotoFile(e.target.files?.[0] || null)}
-                        className="w-full px-3 py-3 bg-slate-800 border border-slate-700 rounded-lg text-slate-100 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-blue-600 file:text-white file:cursor-pointer file:font-medium hover:file:bg-blue-700"
-                      />
-                      {photoFile && (
-                        <div className="mt-2 text-sm text-green-400 flex items-center gap-2">
-                          <CheckCircle2 className="h-4 w-4" />
-                          File selected: {photoFile.name}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Description */}
-                  <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-2">Description</label>
-                    <input 
-                      value={photoDescription} 
-                      onChange={e => setPhotoDescription(e.target.value)} 
-                      placeholder="What's happening in this photo?"
-                      className="w-full px-3 py-3 bg-slate-800 border border-slate-700 rounded-lg text-slate-100 placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    />
-                  </div>
-
-                  {/* Upload Button */}
-                  <button 
-                    onClick={() => handleActionSubmit('photo')} 
-                    disabled={isSubmitting || !photoFile || !actionProjectId} 
-                    className="w-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 disabled:from-slate-700 disabled:to-slate-600 disabled:text-slate-400 text-white py-3 px-4 rounded-lg font-medium transition-all duration-200 shadow-lg disabled:shadow-none flex items-center justify-center gap-2"
-                  >
-                    {isSubmitting ? (
-                      <>
-                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                        Uploading...
-                      </>
-                    ) : (
-                      <>
-                        <Upload className="h-4 w-4" />
-                        Upload Photo
-                      </>
-                    )}
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* Add Improvement */}
-            {/* Add Improvement/Issue */}
-            <ActionCard title="Add Issue/Improvement" icon={Plus}>
-              <div className="space-y-3">
+              <div className="p-4 space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">Project</label>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">Select Lot</label>
                   <select 
                     value={actionProjectId} 
                     onChange={e => setActionProjectId(e.target.value)} 
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-slate-100"
+                    className="w-full px-3 py-3 bg-slate-800 border border-slate-700 rounded-lg text-slate-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   >
                     <option value="">Choose a lot...</option>
                     {projects.map(p => (
@@ -540,17 +579,76 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">Issue Description</label>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">Photo</label>
                   <input 
-                    value={upgradeTitle} 
-                    onChange={e => setUpgradeTitle(e.target.value)} 
-                    placeholder="e.g., Plumbing leak in bathroom, Need electrical upgrade..." 
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-slate-100 placeholder-slate-400"
+                    id="photo-file-input"
+                    type="file" 
+                    accept="image/*" 
+                    onChange={e => setPhotoFile(e.target.files?.[0] || null)}
+                    className="w-full px-3 py-3 bg-slate-800 border border-slate-700 rounded-lg text-slate-100 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-blue-600 file:text-white file:cursor-pointer file:font-medium hover:file:bg-blue-700"
+                  />
+                  {photoFile && (
+                    <div className="mt-2 text-sm text-green-400 flex items-center gap-2">
+                      <CheckCircle2 className="h-4 w-4" />
+                      Selected: {photoFile.name}
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">Description</label>
+                  <input 
+                    value={photoDescription} 
+                    onChange={e => setPhotoDescription(e.target.value)} 
+                    placeholder="What's happening in this photo?"
+                    className="w-full px-3 py-3 bg-slate-800 border border-slate-700 rounded-lg text-slate-100 placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
                 </div>
                 <button 
-                  onClick={() => handleActionSubmit('upgrade')} 
-                  disabled={isSubmitting || !upgradeTitle.trim() || !actionProjectId} 
+                  onClick={() => handleQuickAction('photo')} 
+                  disabled={isSubmitting || !photoFile || !actionProjectId}
+                  className="w-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 disabled:from-slate-700 disabled:to-slate-600 disabled:text-slate-400 text-white py-3 px-4 rounded-lg font-medium transition-all duration-200 shadow-lg disabled:shadow-none flex items-center justify-center gap-2"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      Uploading...
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="h-4 w-4" />
+                      Upload Photo
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Add Issue */}
+            <div className="bg-slate-900/50 backdrop-blur-xl border border-slate-800 rounded-xl overflow-hidden">
+              <div className="p-4 border-b border-slate-800 flex items-center gap-3">
+                <AlertTriangle className="h-5 w-5 text-slate-300" />
+                <h3 className="font-semibold text-slate-100">Add Issue</h3>
+              </div>
+              <div className="p-4 space-y-3">
+                <select 
+                  value={actionProjectId} 
+                  onChange={e => setActionProjectId(e.target.value)} 
+                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-slate-100"
+                >
+                  <option value="">Choose a lot...</option>
+                  {projects.map(p => (
+                    <option key={p.id} value={p.id}>{p.title}</option>
+                  ))}
+                </select>
+                <input 
+                  value={upgradeTitle} 
+                  onChange={e => setUpgradeTitle(e.target.value)} 
+                  placeholder="e.g., Plumbing leak in bathroom..."
+                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-slate-100 placeholder-slate-400"
+                />
+                <button 
+                  onClick={() => handleQuickAction('upgrade')} 
+                  disabled={isSubmitting || !upgradeTitle.trim() || !actionProjectId}
                   className="w-full bg-orange-600 hover:bg-orange-700 disabled:bg-slate-700 disabled:text-slate-400 text-white py-2 px-4 rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
                 >
                   {isSubmitting ? (
@@ -566,50 +664,57 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: {
                   )}
                 </button>
               </div>
-            </ActionCard>
+            </div>
 
             {/* Job Account Setup */}
-            <ActionCard title="Job Account Setup" icon={CheckCircle2}>
-              <div className="space-y-3 max-h-80 overflow-y-auto">
-                {pendingAcct.length > 0 ? pendingAcct.map(row => (
-                  <div key={row.id} className="bg-slate-800/50 border border-slate-700 rounded-lg p-3">
-                    <div 
-                      onClick={() => handleViewProject(row.id)} 
-                      className="cursor-pointer mb-2"
-                    >
-                      <p className="font-medium text-slate-100 text-sm">{row.title}</p>
-                      <p className="text-xs text-slate-400">{row.client}</p>
-                    </div>
-                    <button 
-                      className="w-full bg-yellow-600 hover:bg-yellow-700 text-white py-1.5 px-3 rounded text-sm font-medium transition-colors"
-                      onClick={async () => {
-                        try {
-                          const response = await fetch('/api/projects/job-account', {
-                            method: 'PATCH',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ id: row.id, value: true })
-                          });
-                          if (!response.ok) {
-                            const errorData = await response.json();
-                            throw new Error(errorData.error || 'Failed to update job account');
-                          }
-                          await loadData();
-                        } catch(e: any) {
-                          setError(e.message);
-                        }
-                      }}
-                    >
-                      Mark Complete
-                    </button>
-                  </div>
-                )) : (
-                  <div className="text-center py-8">
-                    <CheckCircle2 className="h-12 w-12 text-green-400 mx-auto mb-3" />
-                    <p className="text-sm text-slate-400">All accounts are set up!</p>
-                  </div>
-                )}
+            <div className="bg-slate-900/50 backdrop-blur-xl border border-slate-800 rounded-xl overflow-hidden">
+              <div className="p-4 border-b border-slate-800 flex items-center gap-3">
+                <CheckCircle2 className="h-5 w-5 text-slate-300" />
+                <h3 className="font-semibold text-slate-100">Job Account Setup</h3>
               </div>
-            </ActionCard>
+              <div className="p-4">
+                <div className="space-y-3 max-h-80 overflow-y-auto">
+                  {pendingAcct.length > 0 ? pendingAcct.map(row => (
+                    <div key={row.id} className="bg-slate-800/50 border border-slate-700 rounded-lg p-3">
+                      <div 
+                        onClick={() => handleViewProject(row.id)} 
+                        className="cursor-pointer mb-2"
+                      >
+                        <p className="font-medium text-slate-100 text-sm">{row.title}</p>
+                        <p className="text-xs text-slate-400">{row.client || 'No client'}</p>
+                      </div>
+                      <button 
+                        className="w-full bg-yellow-600 hover:bg-yellow-700 text-white py-1.5 px-3 rounded text-sm font-medium transition-colors"
+                        onClick={async () => {
+                          try {
+                            const response = await fetch('/api/projects/job-account', {
+                              method: 'PATCH',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ id: row.id, value: true })
+                            });
+                            if (!response.ok) {
+                              const errorData = await response.json();
+                              throw new Error(errorData.error || 'Failed to update job account');
+                            }
+                            await loadData();
+                            setSuccessMessage('Job account marked as complete');
+                          } catch(e: any) {
+                            setError(e.message);
+                          }
+                        }}
+                      >
+                        Mark Complete
+                      </button>
+                    </div>
+                  )) : (
+                    <div className="text-center py-8">
+                      <CheckCircle2 className="h-12 w-12 text-green-400 mx-auto mb-3" />
+                      <p className="text-sm text-slate-400">All accounts are set up!</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -617,14 +722,15 @@ function DashboardComponent({ initialKpis, initialPendingAcct }: {
   );
 }
 
-const KPICard = ({ icon: Icon, label, value, trend, color }: {
+const KPICard = ({ icon: Icon, label, value, trend, color, subtitle }: {
   icon: React.ElementType;
   label: string;
   value: number;
   trend: string;
   color: string;
+  subtitle?: string;
 }) => (
-  <div className="bg-slate-900/50 backdrop-blur-xl border border-slate-800 rounded-xl p-4">
+  <div className="bg-slate-900/50 backdrop-blur-xl border border-slate-800 rounded-xl p-4 hover:border-slate-700 transition-all">
     <div className="flex items-center justify-between">
       <div className={`p-2 rounded-lg bg-slate-800 ${color}`}>
         <Icon className="h-5 w-5" />
@@ -636,49 +742,48 @@ const KPICard = ({ icon: Icon, label, value, trend, color }: {
     <div className="mt-3">
       <p className="text-2xl font-bold text-slate-100">{value}</p>
       <p className="text-sm text-slate-400">{label}</p>
+      {subtitle && <p className="text-xs text-slate-500 mt-1">{subtitle}</p>}
     </div>
   </div>
 );
 
-const ActionCard = ({ icon: Icon, title, children }: {
-  icon: React.ElementType;
-  title: string;
-  children: React.ReactNode;
-}) => (
-  <div className="bg-slate-900/50 backdrop-blur-xl border border-slate-800 rounded-xl overflow-hidden">
-    <div className="p-4 border-b border-slate-800 flex items-center gap-3">
-      <Icon className="h-5 w-5 text-slate-300" />
-      <h3 className="font-semibold text-slate-100">{title}</h3>
-    </div>
-    <div className="p-4">{children}</div>
-  </div>
-);
-
-const PhaseContainer = ({ phase, projects, onProjectClick, hideHeader = false }: {
+const PhaseContainer = ({ phase, projects, onProjectClick, onStatusUpdate, editingProject, setEditingProject, editingStatus, setEditingStatus, statusOptions, hideHeader = false }: {
   phase: typeof PIPELINE_PHASES[0];
   projects: BoardItem[];
   onProjectClick: (id: string) => void;
+  onStatusUpdate: (id: string, status: string) => void;
+  editingProject: string | null;
+  setEditingProject: (id: string | null) => void;
+  editingStatus: string;
+  setEditingStatus: (status: string) => void;
+  statusOptions: string[];
   hideHeader?: boolean;
 }) => (
-  <div className="bg-slate-900/30 backdrop-blur-xl border border-slate-800 rounded-xl overflow-hidden">
+  <div className="bg-slate-900/30 backdrop-blur-xl border border-slate-800 rounded-2xl overflow-hidden">
     {!hideHeader && (
-      <div className={`p-4 border-b border-slate-800 ${phase.headerColor} flex items-center gap-3`}>
-        <div className={`p-2 rounded-lg ${phase.color}`}>
-          <phase.icon className={`h-5 w-5 ${phase.iconColor}`} />
+      <div className={`p-6 border-b border-slate-800 ${phase.headerColor} flex items-center gap-3`}>
+        <div className={`p-3 rounded-xl ${phase.color}`}>
+          <phase.icon className={`h-6 w-6 ${phase.iconColor}`} />
         </div>
-        <h2 className="text-lg font-semibold text-slate-100">
+        <h2 className="text-xl font-semibold text-slate-100">
           {phase.label} ({projects.length})
         </h2>
       </div>
     )}
-    <div className="p-4">
-      <div className="max-h-96 overflow-y-auto space-y-3">
+    <div className="p-6">
+      <div className="space-y-4">
         {projects.map(project => (
           <ProjectCard
             key={project.id}
             project={project}
             phase={phase}
             onClick={() => onProjectClick(project.id)}
+            onStatusUpdate={onStatusUpdate}
+            editingProject={editingProject}
+            setEditingProject={setEditingProject}
+            editingStatus={editingStatus}
+            setEditingStatus={setEditingStatus}
+            statusOptions={statusOptions}
           />
         ))}
       </div>
@@ -686,31 +791,73 @@ const PhaseContainer = ({ phase, projects, onProjectClick, hideHeader = false }:
   </div>
 );
 
-const ProjectCard = ({ project, phase, onClick }: {
+const ProjectCard = ({ project, phase, onClick, onStatusUpdate, editingProject, setEditingProject, editingStatus, setEditingStatus, statusOptions }: {
   project: BoardItem;
   phase: typeof PIPELINE_PHASES[0];
   onClick: () => void;
+  onStatusUpdate: (id: string, status: string) => void;
+  editingProject: string | null;
+  setEditingProject: (id: string | null) => void;
+  editingStatus: string;
+  setEditingStatus: (status: string) => void;
+  statusOptions: string[];
 }) => (
-  <div 
-    onClick={onClick}
-    className="bg-slate-800/50 backdrop-blur-xl border border-slate-700 rounded-lg p-4 cursor-pointer transition-all hover:border-slate-600 hover:bg-slate-800/70 hover:shadow-xl hover:shadow-blue-500/10 group"
-  >
+  <div className="bg-slate-800/50 backdrop-blur-xl border border-slate-700 rounded-xl p-4 hover:border-slate-600 hover:bg-slate-800/70 transition-all group">
     <div className="flex items-start justify-between mb-3">
       <div className="min-w-0 flex-1">
-        <h3 className="font-semibold text-slate-100 text-base truncate group-hover:text-blue-300 transition-colors">
+        <h3 className="font-semibold text-slate-100 text-lg truncate group-hover:text-blue-300 transition-colors cursor-pointer" onClick={onClick}>
           {project.title}
         </h3>
-        <div className="flex items-center gap-2 mt-1">
-          <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium ${phase.color}`}>
-            <phase.icon className="h-3 w-3" />
-            {project.status || 'No Status'}
-          </div>
+        <div className="flex items-center gap-2 mt-2">
+          {editingProject === project.id ? (
+            <div className="flex items-center gap-2">
+              <select
+                value={editingStatus}
+                onChange={e => setEditingStatus(e.target.value)}
+                className="px-2 py-1 bg-slate-700 border border-slate-600 rounded text-xs text-slate-100"
+              >
+                {statusOptions.filter(s => s !== 'All').map(status => (
+                  <option key={status} value={status}>{status}</option>
+                ))}
+              </select>
+              <button
+                onClick={() => {
+                  onStatusUpdate(project.id, editingStatus);
+                }}
+                className="p-1 text-green-400 hover:text-green-300"
+              >
+                <Save className="h-3 w-3" />
+              </button>
+              <button
+                onClick={() => setEditingProject(null)}
+                className="p-1 text-red-400 hover:text-red-300"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <div className={`inline-flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-medium ${phase.color}`}>
+                <phase.icon className="h-3 w-3" />
+                {project.status || 'No Status'}
+              </div>
+              <button
+                onClick={() => {
+                  setEditingProject(project.id);
+                  setEditingStatus(project.status || '');
+                }}
+                className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-slate-200 transition-all"
+              >
+                <Edit3 className="h-3 w-3" />
+              </button>
+            </div>
+          )}
         </div>
       </div>
-      <ExternalLink className="h-4 w-4 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+      <ExternalLink className="h-4 w-4 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer" onClick={onClick} />
     </div>
     
-    <div className="space-y-1 text-sm">
+    <div className="space-y-2 text-sm">
       {project.client && (
         <div className="flex items-center gap-2 text-slate-300">
           <User className="h-3 w-3 text-slate-400" />
@@ -733,6 +880,22 @@ const ProjectCard = ({ project, phase, onClick }: {
   </div>
 );
 
+// Simple placeholder for ProjectDetailPanel
+const ProjectDetailPanel = ({ projectId, onClose }: { projectId: string; onClose: () => void }) => (
+  <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+    <div className="bg-slate-900 rounded-xl p-6 max-w-md w-full">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-xl font-bold text-slate-100">Project Details</h2>
+        <button onClick={onClose} className="text-slate-400 hover:text-slate-100">
+          <X className="h-6 w-6" />
+        </button>
+      </div>
+      <p className="text-slate-400">Project ID: {projectId}</p>
+      <p className="text-sm text-slate-500 mt-2">Full project detail panel coming soon...</p>
+    </div>
+  </div>
+);
+
 export default function OperationsDashboard(props: { 
   initialKpis: KPI; 
   initialPendingAcct: ProjectRow[]; 
@@ -748,244 +911,5 @@ export default function OperationsDashboard(props: {
     }>
       <DashboardComponent {...props} />
     </Suspense>
-  );
-}
-
-// ProjectDetailPanel Component
-function ProjectDetailPanel({ projectId, onClose }: { 
-  projectId: string; 
-  onClose: () => void; 
-}) {
-  const [data, setData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState('photos');
-
-  useEffect(() => {
-    async function fetchData() {
-      setLoading(true);
-      setError(null);
-      setData(null);
-      try {
-        const res = await fetch(`/api/projects/${projectId}/full`, { cache: 'no-store' });
-        if (!res.ok) {
-          const errorData = await res.json().catch(() => ({ error: 'Failed to parse error response' }));
-          throw new Error(errorData.error || 'Failed to fetch project details');
-        }
-        const projectData = await res.json();
-        setData(projectData);
-      } catch (e: any) { 
-        setError(e.message || 'Unknown error occurred');
-      } finally { 
-        setLoading(false);
-      }
-    }
-    
-    if (projectId) {
-      fetchData();
-    }
-  }, [projectId]);
-
-  const { project, photos = [] } = data || {};
-
-  const DETAIL_TABS = [
-    { key: 'photos', label: 'Photos', icon: Camera },
-    { key: 'overview', label: 'Overview', icon: FileText },
-    { key: 'finances', label: 'Finances', icon: DollarSign },
-  ];
-
-  return (
-    <div className="fixed inset-0 z-50">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative z-10 bg-slate-900 border-l border-slate-800 h-full w-full max-w-4xl ml-auto flex flex-col shadow-2xl">
-        {/* Header */}
-        <div className="flex-shrink-0 bg-slate-900/95 backdrop-blur-xl border-b border-slate-800">
-          <div className="p-6">
-            <div className="flex items-start justify-between">
-              {loading ? (
-                <div className="space-y-3">
-                  <div className="h-8 w-3/4 bg-slate-800 rounded-md animate-pulse" />
-                  <div className="h-4 w-1/2 bg-slate-800 rounded-md animate-pulse" />
-                </div>
-              ) : (
-                <div className="min-w-0 flex-1">
-                  <h1 className="text-2xl font-bold text-slate-100 mb-2">{project?.title || 'Project Details'}</h1>
-                  <div className="flex flex-wrap items-center gap-4 text-sm">
-                    {project?.client && (
-                      <div className="flex items-center gap-2 text-slate-300">
-                        <User className="h-4 w-4 text-slate-400" />
-                        <span>{project.client}</span>
-                      </div>
-                    )}
-                    {project?.status && (
-                      <div className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-blue-500/20 text-blue-300 border border-blue-500/30">
-                        <CheckCircle2 className="h-3 w-3" />
-                        {project.status}
-                      </div>
-                    )}
-                    {project?.location && (
-                      <a 
-                        href={`https://maps.google.com/?q=${encodeURIComponent(project.location)}`}
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-2 text-blue-400 hover:text-blue-300 transition-colors"
-                      >
-                        <MapPin className="h-4 w-4" />
-                        <span className="hover:underline">View Location</span>
-                        <ExternalLink className="h-3 w-3" />
-                      </a>
-                    )}
-                  </div>
-                </div>
-              )}
-              <button 
-                onClick={onClose} 
-                className="text-slate-400 hover:text-slate-100 p-2 rounded-lg hover:bg-slate-800 transition-colors"
-              >
-                <X className="h-6 w-6" />
-              </button>
-            </div>
-            
-            {/* Tabs */}
-            <div className="mt-6 border-b border-slate-800">
-              <nav className="-mb-px flex gap-1 overflow-x-auto">
-                {DETAIL_TABS.map(tab => (
-                  <button
-                    key={tab.key}
-                    onClick={() => setActiveTab(tab.key)}
-                    className={`flex items-center gap-2 py-3 px-4 text-sm font-medium rounded-t-lg whitespace-nowrap transition-colors ${
-                      activeTab === tab.key
-                        ? 'bg-slate-800 text-blue-300 border-b-2 border-blue-500'
-                        : 'text-slate-400 hover:text-slate-300 hover:bg-slate-800/50'
-                    }`}
-                  >
-                    <tab.icon className="h-4 w-4" />
-                    {tab.label}
-                    {tab.key === 'photos' && photos && (
-                      <span className="bg-slate-700 text-slate-300 text-xs px-2 py-0.5 rounded-full">
-                        {photos.length}
-                      </span>
-                    )}
-                  </button>
-                ))}
-              </nav>
-            </div>
-          </div>
-        </div>
-
-        {/* Content */}
-        <div className="flex-grow overflow-y-auto">
-          <div className="p-6">
-            {loading && (
-              <div className="space-y-4">
-                {[...Array(3)].map((_, i) => (
-                  <div key={i} className="h-24 bg-slate-800 rounded-lg animate-pulse" />
-                ))}
-              </div>
-            )}
-            
-            {error && (
-              <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-lg flex items-center gap-3">
-                <AlertCircle className="h-5 w-5" />
-                <span>{error}</span>
-              </div>
-            )}
-            
-            {data && (
-              <div>
-                {activeTab === 'photos' && (
-                  <div>
-                    {photos.length > 0 ? (
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                        {photos.map((photo: any) => (
-                          <div key={photo.id} className="group">
-                            <div className="bg-slate-800/50 border border-slate-700 rounded-xl overflow-hidden hover:border-slate-600 transition-colors">
-                              <a href={photo.url} target="_blank" rel="noopener noreferrer" className="block relative">
-                                <img 
-                                  src={photo.url} 
-                                  alt={photo.description} 
-                                  className="w-full h-48 object-cover bg-slate-800 group-hover:scale-105 transition-transform duration-300" 
-                                />
-                                <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent"/>
-                                <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                                  <div className="bg-black/60 backdrop-blur-sm rounded-lg p-2">
-                                    <ExternalLink className="h-4 w-4 text-white" />
-                                  </div>
-                                </div>
-                              </a>
-                              <div className="p-4">
-                                <p className="text-sm text-slate-300">{photo.description}</p>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="text-center py-12">
-                        <Camera className="h-12 w-12 text-slate-400 mx-auto mb-4" />
-                        <p className="text-slate-400">No photos uploaded yet</p>
-                        <p className="text-sm text-slate-500 mt-1">Photos will appear here as they're added to the project</p>
-                      </div>
-                    )}
-                  </div>
-                )}
-                
-                {activeTab === 'overview' && project && (
-                  <div className="space-y-6">
-                    <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-6">
-                      <h3 className="font-semibold text-slate-100 mb-4">Project Details</h3>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="p-3 bg-slate-800/30 rounded-lg">
-                          <p className="text-sm text-slate-400">Status</p>
-                          <p className="font-semibold text-slate-100">{project.status || '-'}</p>
-                        </div>
-                        <div className="p-3 bg-slate-800/30 rounded-lg">
-                          <p className="text-sm text-slate-400">Client</p>
-                          <p className="font-semibold text-slate-100">{project.client || '-'}</p>
-                        </div>
-                        <div className="p-3 bg-slate-800/30 rounded-lg">
-                          <p className="text-sm text-slate-400">Builder</p>
-                          <p className="font-semibold text-slate-100">{project.builder || '-'}</p>
-                        </div>
-                        <div className="p-3 bg-slate-800/30 rounded-lg">
-                          <p className="text-sm text-slate-400">Location</p>
-                          <p className="font-semibold text-slate-100">{project.location || '-'}</p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-                
-                {activeTab === 'finances' && project && (
-                  <div className="space-y-6">
-                    <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-6">
-                      <h3 className="font-semibold text-slate-100 mb-4">Financial Overview</h3>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="p-3 bg-slate-800/30 rounded-lg">
-                          <p className="text-sm text-slate-400">Budget</p>
-                          <p className="font-semibold text-slate-100">{project.budget ? `${project.budget.toLocaleString()}` : '-'}</p>
-                        </div>
-                        <div className="p-3 bg-slate-800/30 rounded-lg">
-                          <p className="text-sm text-slate-400">Spent</p>
-                          <p className="font-semibold text-slate-100">{project.spent ? `${project.spent.toLocaleString()}` : '-'}</p>
-                        </div>
-                        <div className="p-3 bg-slate-800/30 rounded-lg">
-                          <p className="text-sm text-slate-400">Total Hours</p>
-                          <p className="font-semibold text-slate-100">{project.totalHours ? `${project.totalHours} hrs` : '-'}</p>
-                        </div>
-                        <div className="p-3 bg-slate-800/30 rounded-lg">
-                          <p className="text-sm text-slate-400">Open Tasks</p>
-                          <p className="font-semibold text-slate-100">{project.openTasks || '0'}</p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
   );
 }
