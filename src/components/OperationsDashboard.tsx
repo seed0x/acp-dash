@@ -19,11 +19,7 @@ type KPI = {
   openProblems: number; 
 };
 
-type ProjectRow = { 
-  id: string; 
-  title: string; 
-  client?: string; 
-};
+type ProjectRow = { id: string; title: string; client?: string; location?: string; status?: string }
 
 type BoardItem = { 
   id: string; 
@@ -177,7 +173,7 @@ async function fetchJSON<T>(url: string): Promise<T> {
   return {} as T;
 }
 
-export default function OperationsDashboard() {
+export default function OperationsDashboard({ initialKpis, initialPendingAcct }: OpsProps) {
   const [viewingProjectId, setViewingProjectId] = useState<string | null>(null);
   const [kpis, setKpis] = useState<KPI>({ postAndBeam: 0, activeBids: 0, jobAccountsPending: 0, openProblems: 0 });
   const [pendingAcct, setPendingAcct] = useState<ProjectRow[]>([]);
