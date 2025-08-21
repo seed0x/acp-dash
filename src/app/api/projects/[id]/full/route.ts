@@ -13,12 +13,31 @@ export async function GET(
       }, { status: 400 })
     }
 
+    // This will now return project data with comments, tasks, issues, photos, etc.
     const data = await getProjectFull(params.id)
-    return NextResponse.json(data)
+    
+    // Ensure all arrays exist even if empty
+    const fullData = {
+      ...data,
+      comments: data.comments || [],
+      tasks: data.tasks || [],
+      issues: data.issues || [],
+      photos: data.photos || [],
+      expenses: data.expenses || []
+    }
+    
+    return NextResponse.json(fullData)
   } catch (e: any) {
     console.error('Project full API error:', e);
     return NextResponse.json({ 
-      error: e?.message || 'Failed to fetch project details' 
+      error: e?.message || 'Failed to fetch project details',
+      // Return empty structure on error so UI doesn't break
+      project: {},
+      comments: [],
+      tasks: [],
+      issues: [],
+      photos: [],
+      expenses: []
     }, { status: 500 })
   }
 }

@@ -10,6 +10,7 @@ export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url)
     const openOnly = searchParams.get('openOnly') === 'true'
+    // This will now include projectId in the returned data
     const rows = await listImprovements(openOnly)
     return NextResponse.json({ rows })
   } catch (e: any) {
@@ -34,6 +35,7 @@ export async function POST(req: Request) {
     await createImprovement({
       projectId: body.projectId,
       title: body.title,
+      priority: body.priority
     })
     
     return NextResponse.json({ ok: true })
