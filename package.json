@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    
   },
   "dependencies": {
     "@notionhq/client": "^2.2.14",
@@ -26,9 +28,5 @@
     "tailwindcss-animate": "^1.0.7",
     "typescript": "^5.4.2"
   }
-  "scripts": {
-  "typecheck": "tsc --noEmit",
-  "build": "next build"
-}
 
 }
