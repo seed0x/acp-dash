@@ -78,9 +78,9 @@ export default function OperationsDashboard() {
   /* Load projects for Upgrade dropdown */
   const loadProjectOptions = async () => {
     try {
-      const data = await fetchJSON<{ options: ProjectOption[] }>('/api/projects/list');
-      setProjects(data.options);
-      if (!projectId && data.options.length) setProjectId(data.options[0].id);
+      const data = await fetchJSON<{ rows: ProjectOption[] }>('/api/projects/list');
+      setProjects(data.rows);
+      if (!projectId && data.rows.length) setProjectId(data.rows[0].id);
     } catch (e: any) {
       // non-fatal for UI; show in banner if nothing else
       setError(prev => prev ?? (e?.message || String(e)));
