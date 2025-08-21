@@ -964,4 +964,4 @@ export default function OperationsDashboard(props: {
       <DashboardComponent {...props} />
     </Suspense>
   );
-}}
+}
