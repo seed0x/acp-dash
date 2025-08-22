@@ -170,32 +170,8 @@ export async function GET(req: Request) {
     }
     
     // Fetch photos from Notion
-    try {
-      const photos = await getProjectPhotos(projectId);
-      return NextResponse.json({ photos });
-    } catch (notionError) {
-      console.error('Notion API error, falling back to mock data:', notionError);
-      
-      // Fallback to mock data
-      const photos = [
-        {
-          id: '1',
-          url: '/api/placeholder/400/300',
-          description: 'Foundation work',
-          date: '2024-01-15',
-          category: 'Construction'
-        },
-        {
-          id: '2',
-          url: '/api/placeholder/400/300',
-          description: 'Plumbing rough-in',
-          date: '2024-01-20',
-          category: 'Plumbing'
-        }
-      ];
-      
-      return NextResponse.json({ photos });
-    }
+    const photos = await getProjectPhotos(projectId);
+    return NextResponse.json({ photos });
   } catch (e: any) {
     console.error('Photo fetch error:', e);
     return NextResponse.json({ 

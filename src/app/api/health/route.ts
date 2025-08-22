@@ -10,7 +10,6 @@ import {
   EXPENSES_DB_ID,
   checkNotionConnection
 } from '@/lib/notion-dashboard'
-import { isRestrictedEnvironment } from '@/lib/mock-data'
 
 export async function GET() {
   const report: any = {
@@ -19,20 +18,18 @@ export async function GET() {
       NODE_ENV: process.env.NODE_ENV,
       nodeVersion: process.versions.node,
       timestamp: new Date().toISOString(),
-      isRestrictedEnvironment: isRestrictedEnvironment()
+      isCI: !!(process.env.GITHUB_ACTIONS || process.env.CI)
     },
     notion: {
-      available: false,
-      fallbackMode: false
+      available: false
     },
     databases: {},
     errors: [] as string[],
   }
 
-  // Check if we're in a restricted environment first
-  if (isRestrictedEnvironment()) {
-    report.notion.fallbackMode = true;
-    report.errors.push('Running in restricted environment (CI/GitHub Actions), using mock data');
+  // Check if we're in CI environment
+  if (process.env.GITHUB_ACTIONS || process.env.CI) {
+    report.errors.push('Running in CI environment - Notion connection skipped');
     return NextResponse.json(report, { status: 200 });
   }
 
@@ -42,16 +39,14 @@ export async function GET() {
     report.notion.available = isConnected;
     
     if (!isConnected) {
-      report.notion.fallbackMode = true;
-      report.errors.push('Notion API unavailable, using mock data fallback');
-      return NextResponse.json(report, { status: 200 });
+      report.errors.push('Notion API unavailable');
+      return NextResponse.json(report, { status: 500 });
     }
 
     // If connection works, try to get user info
     const me = await notion.users.me({})
     report.notion.me = { type: (me as any).type }
   } catch (e: any) {
-    report.notion.fallbackMode = true;
     report.errors.push(`Notion connection failed: ${e?.message || e}`)
   }
 
@@ -86,6 +81,6 @@ export async function GET() {
     }
   }
 
-  const status = report.errors.length && !report.notion.fallbackMode ? 500 : 200
+  const status = report.errors.length ? 500 : 200
   return NextResponse.json(report, { status })
 }

@@ -38,54 +38,8 @@ export const PhotoGallery: React.FC<PhotoGalleryProps> = ({ projectId, searchTer
         if (response.ok) {
           setPhotos(data.photos || []);
         } else {
-          // Fallback to mock data if API fails
-          setPhotos([
-            { 
-              id: 1, 
-              url: '/api/placeholder/400/300', 
-              description: 'Foundation work', 
-              date: '2024-01-10',
-              category: 'Construction',
-              photographer: 'Site Manager',
-              metadata: { width: 1920, height: 1080, fileSize: '2.4 MB' }
-            },
-            { 
-              id: 2, 
-              url: '/api/placeholder/400/300', 
-              description: 'Framing progress', 
-              date: '2024-01-15',
-              category: 'Construction',
-              photographer: 'Project Manager',
-              metadata: { width: 1920, height: 1080, fileSize: '3.1 MB' }
-            },
-            { 
-              id: 3, 
-              url: '/api/placeholder/400/300', 
-              description: 'Electrical rough-in', 
-              date: '2024-01-20',
-              category: 'Electrical',
-              photographer: 'Electrician',
-              metadata: { width: 1920, height: 1080, fileSize: '2.8 MB' }
-            },
-            { 
-              id: 4, 
-              url: '/api/placeholder/400/300', 
-              description: 'Plumbing installation', 
-              date: '2024-01-25',
-              category: 'Plumbing',
-              photographer: 'Plumber',
-              metadata: { width: 1920, height: 1080, fileSize: '3.5 MB' }
-            },
-            { 
-              id: 5, 
-              url: '/api/placeholder/400/300', 
-              description: 'Final inspection', 
-              date: '2024-02-01',
-              category: 'Inspection',
-              photographer: 'Inspector',
-              metadata: { width: 1920, height: 1080, fileSize: '2.9 MB' }
-            }
-          ]);
+          console.error('Failed to load photos:', data.error);
+          setPhotos([]);
         }
       } catch (error) {
         console.error('Failed to load photos:', error);
