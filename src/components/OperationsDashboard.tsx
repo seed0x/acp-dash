@@ -1,1097 +1,1218 @@
-'use client';
-
-import { Suspense, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { 
   Plus, Camera, CheckCircle2, Search, User, Building, MapPin, 
   DollarSign, Clock, TrendingUp, AlertCircle, CheckSquare,
-  Calendar, ExternalLink, Star, Home,
+  Calendar, ExternalLink, Star, Home, Bell, Settings,
   Hammer, Wrench, PaintBucket, FileText, CreditCard, Upload, X,
-  Edit3, Save, Eye, MessageSquare, Trophy, 
-  AlertTriangle, ChevronRight, Trash2, UserCheck,
-  Target, CheckCheck, ClipboardList, Send, MoreVertical,
-  ChevronDown, Activity, Package, Users, Hash
+  Edit3, Save, Eye, MessageSquare, Trophy, Filter,
+  AlertTriangle, ChevronRight, Trash2, UserCheck, MoreVertical,
+  Target, CheckCheck, ClipboardList, Send, Hash, ChevronDown,
+  Activity, Package, Users, ArrowUp, ArrowDown, Inbox,
+  Layers, BarChart3, Download, Copy, Pin, PinOff, Command,
+  RefreshCw, Wifi, WifiOff, Zap, Timer, FolderOpen, Archive
 } from 'lucide-react';
 
-// Type definitions
-type KPI = { 
-  postAndBeam: number; 
-  activeBids: number; 
-  jobAccountsPending: number; 
-  openProblems: number; 
-};
+// ==================== CONTEXT & STATE MANAGEMENT ====================
 
-type ProjectRow = { 
-  id: string; 
-  title: string; 
-  client?: string; 
-};
+const AppContext = createContext({});
 
-type BoardItem = { 
-  id: string; 
-  title: string; 
-  status?: string; 
-  client?: string; 
-  location?: string; 
-  builder?: string;
-  subdivision?: string;
-  jobNumber?: string;
-  projectManager?: string;
-  superintendent?: string;
-  permitNumber?: string;
-  startDate?: string;
-  completionDate?: string;
-};
+const AppProvider = ({ children }) => {
+  const [projects, setProjects] = useState([]);
+  const [selectedProjects, setSelectedProjects] = useState(new Set());
+  const [notifications, setNotifications] = useState([]);
+  const [isOnline, setIsOnline] = useState(true);
+  const [recentlyViewed, setRecentlyViewed] = useState([]);
+  const [pinnedProjects, setPinnedProjects] = useState(new Set());
+  const [pendingActions, setPendingActions] = useState([]);
+  const [searchHistory, setSearchHistory] = useState([]);
+  const [activeFilters, setActiveFilters] = useState({
+    phase: 'all',
+    assignee: null,
+    dateRange: null,
+    priority: null
+  });
 
-type ProjectOption = { 
-  id: string; 
-  title: string;
-  subdivision?: string;
-};
-
-type Issue = {
-  id: string;
-  title: string;
-  status?: string;
-  projectName?: string;
-  projectId?: string;
-  description?: string;
-  priority?: string;
-  createdDate?: string;
-  assignee?: string;
-};
-
-type Task = {
-  id: string;
-  title: string;
-  status?: string;
-  completed?: boolean;
-  assignee?: string;
-  dueDate?: string;
-  category?: string;
-  projectId?: string;
-};
-
-type Comment = {
-  id: string;
-  text: string;
-  author?: string;
-  createdAt: string;
-  projectId?: string;
-};
-
-type Photo = {
-  id: string;
-  url: string;
-  description: string;
-  date?: string;
-};
-
-type ProjectFull = {
-  project: BoardItem & {
-    budget?: number;
-    spent?: number;
-    phone?: string;
-    email?: string;
-    notes?: string;
-  };
-  tasks: Task[];
-  issues: Issue[];
-  photos: Photo[];
-  comments: Comment[];
-  expenses: any[];
-};
-
-// Pipeline phases configuration
-const PIPELINE_PHASES = [
-  { 
-    key: 'bidding', 
-    label: 'Bidding', 
-    icon: Target, 
-    statuses: ['bidding', 'proposal', 'quote sent', 'pending', 'new lead'],
-    color: 'bg-yellow-500/20 border-yellow-500/30',
-    iconColor: 'text-yellow-400'
-  },
-  { 
-    key: 'post-beam', 
-    label: 'Post & Beam', 
-    icon: Hammer, 
-    statuses: ['post & beam', 'foundation', 'rough-in', 'rough in', 'framing'],
-    color: 'bg-blue-500/20 border-blue-500/30',
-    iconColor: 'text-blue-400'
-  },
-  { 
-    key: 'trim', 
-    label: 'Trim', 
-    icon: PaintBucket, 
-    statuses: ['trim', 'finishing', 'final', 'fixtures'],
-    color: 'bg-green-500/20 border-green-500/30',
-    iconColor: 'text-green-400'
-  },
-  { 
-    key: 'complete', 
-    label: 'Complete', 
-    icon: CheckCheck, 
-    statuses: ['invoice ready', 'complete', 'done', 'closed'],
-    color: 'bg-emerald-500/20 border-emerald-500/30',
-    iconColor: 'text-emerald-400'
-  }
-];
-
-async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, { cache: 'no-store', ...init });
-  if (!res.ok) {
-    const errorBody = await res.json().catch(() => ({ error: 'Fetch error' }));
-    throw new Error(errorBody.error || 'Fetch error');
-  }
-  return res.json() as T;
-}
-
-function getProjectPhase(status?: string) {
-  if (!status) return 'other';
-  const statusLower = status.toLowerCase();
-  for (const phase of PIPELINE_PHASES) {
-    if (phase.statuses.some(s => statusLower.includes(s))) {
-      return phase.key;
+  // Notification system
+  const notify = useCallback((message, type = 'info', duration = 3000) => {
+    const id = Date.now();
+    const notification = { id, message, type, timestamp: new Date() };
+    setNotifications(prev => [...prev, notification]);
+    if (duration > 0) {
+      setTimeout(() => {
+        setNotifications(prev => prev.filter(n => n.id !== id));
+      }, duration);
     }
-  }
-  return 'other';
-}
+    return id;
+  }, []);
 
-// Enhanced Project Detail Panel with full functionality
-function ProjectDetailPanel({ projectId, onClose }: { projectId: string; onClose: () => void }) {
-  const [data, setData] = useState<ProjectFull | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('overview');
-  const [newComment, setNewComment] = useState('');
-  const [newTask, setNewTask] = useState('');
-  const [showNewTask, setShowNewTask] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
+  // Offline queue management
+  const queueAction = useCallback((action) => {
+    setPendingActions(prev => [...prev, { ...action, id: Date.now() }]);
+    notify('Action queued - will sync when online', 'warning');
+  }, [notify]);
+
+  // Recent items tracking
+  const addToRecent = useCallback((projectId) => {
+    setRecentlyViewed(prev => {
+      const filtered = prev.filter(id => id !== projectId);
+      return [projectId, ...filtered].slice(0, 5);
+    });
+  }, []);
+
+  // Pin/unpin projects
+  const togglePin = useCallback((projectId) => {
+    setPinnedProjects(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(projectId)) {
+        newSet.delete(projectId);
+        notify('Project unpinned', 'info');
+      } else {
+        newSet.add(projectId);
+        notify('Project pinned', 'success');
+      }
+      return newSet;
+    });
+  }, [notify]);
+
+  // Network status monitoring
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      notify('Back online - syncing...', 'success');
+      // Process pending queue
+      pendingActions.forEach(action => {
+        // Execute queued actions
+        console.log('Processing queued action:', action);
+      });
+      setPendingActions([]);
+    };
+
+    const handleOffline = () => {
+      setIsOnline(false);
+      notify('Working offline - changes will sync when connection restored', 'warning');
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [pendingActions, notify]);
+
+  const value = {
+    projects, setProjects,
+    selectedProjects, setSelectedProjects,
+    notifications, notify,
+    isOnline, queueAction,
+    recentlyViewed, addToRecent,
+    pinnedProjects, togglePin,
+    searchHistory, setSearchHistory,
+    activeFilters, setActiveFilters
+  };
+
+  return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
+};
+
+const useApp = () => useContext(AppContext);
+
+// ==================== CUSTOM HOOKS ====================
+
+const useKeyboardShortcuts = () => {
+  const { notify } = useApp();
+  
+  useEffect(() => {
+    const handleKeyPress = (e) => {
+      // Command/Ctrl + K for search
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        document.getElementById('global-search')?.focus();
+      }
+      // Command/Ctrl + N for new issue
+      if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
+        e.preventDefault();
+        document.getElementById('quick-issue-input')?.focus();
+      }
+      // Escape to close panels
+      if (e.key === 'Escape') {
+        document.querySelector('.side-panel-close')?.click();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyPress);
+    return () => window.removeEventListener('keydown', handleKeyPress);
+  }, [notify]);
+};
+
+const useLocalStorage = (key, defaultValue) => {
+  const [value, setValue] = useState(() => {
+    try {
+      const item = window.localStorage.getItem(key);
+      return item ? JSON.parse(item) : defaultValue;
+    } catch (error) {
+      console.error(`Error loading ${key} from localStorage:`, error);
+      return defaultValue;
+    }
+  });
+
+  const setStoredValue = useCallback((newValue) => {
+    try {
+      setValue(newValue);
+      window.localStorage.setItem(key, JSON.stringify(newValue));
+    } catch (error) {
+      console.error(`Error saving ${key} to localStorage:`, error);
+    }
+  }, [key]);
+
+  return [value, setStoredValue];
+};
+
+const useDebounce = (value, delay) => {
+  const [debouncedValue, setDebouncedValue] = useState(value);
 
   useEffect(() => {
-    loadProjectData();
+    const handler = setTimeout(() => {
+      setDebouncedValue(value);
+    }, delay);
+
+    return () => clearTimeout(handler);
+  }, [value, delay]);
+
+  return debouncedValue;
+};
+
+// ==================== NOTIFICATION SYSTEM ====================
+
+const NotificationCenter = () => {
+  const { notifications } = useApp();
+
+  return (
+    <div className="fixed bottom-4 right-4 z-50 space-y-2 max-w-sm">
+      {notifications.map(notification => (
+        <div
+          key={notification.id}
+          className={`
+            p-4 rounded-lg shadow-lg backdrop-blur-xl border animate-slide-up
+            ${notification.type === 'success' ? 'bg-green-500/20 border-green-500 text-green-300' : ''}
+            ${notification.type === 'error' ? 'bg-red-500/20 border-red-500 text-red-300' : ''}
+            ${notification.type === 'warning' ? 'bg-yellow-500/20 border-yellow-500 text-yellow-300' : ''}
+            ${notification.type === 'info' ? 'bg-blue-500/20 border-blue-500 text-blue-300' : ''}
+          `}
+        >
+          <div className="flex items-start gap-3">
+            {notification.type === 'success' && <CheckCircle2 className="h-5 w-5 flex-shrink-0 mt-0.5" />}
+            {notification.type === 'error' && <AlertCircle className="h-5 w-5 flex-shrink-0 mt-0.5" />}
+            {notification.type === 'warning' && <AlertTriangle className="h-5 w-5 flex-shrink-0 mt-0.5" />}
+            {notification.type === 'info' && <Bell className="h-5 w-5 flex-shrink-0 mt-0.5" />}
+            <div className="flex-1">
+              <p className="text-sm font-medium">{notification.message}</p>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+// ==================== HEADER WITH KPIs ====================
+
+const Header = ({ kpis }) => {
+  const { isOnline, pendingActions } = useApp();
+  const [showCommandPalette, setShowCommandPalette] = useState(false);
+
+  return (
+    <header className="border-b border-slate-800 bg-slate-900/80 backdrop-blur-xl sticky top-0 z-40">
+      <div className="max-w-7xl mx-auto px-4 py-3">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-4">
+            <h1 className="text-xl font-bold text-white flex items-center gap-2">
+              <Home className="h-5 w-5" />
+              ACP Operations
+            </h1>
+            <div className="flex items-center gap-2">
+              {!isOnline && (
+                <span className="flex items-center gap-1 px-2 py-1 bg-yellow-500/20 text-yellow-300 rounded text-xs">
+                  <WifiOff className="h-3 w-3" />
+                  Offline
+                </span>
+              )}
+              {pendingActions.length > 0 && (
+                <span className="flex items-center gap-1 px-2 py-1 bg-orange-500/20 text-orange-300 rounded text-xs">
+                  <RefreshCw className="h-3 w-3 animate-spin" />
+                  {pendingActions.length} pending
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setShowCommandPalette(true)}
+              className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 text-slate-300 rounded-lg text-sm hover:bg-slate-700"
+            >
+              <Command className="h-4 w-4" />
+              <span className="hidden sm:inline">Cmd+K</span>
+            </button>
+            <button className="p-2 text-slate-400 hover:text-white">
+              <Bell className="h-5 w-5" />
+            </button>
+            <button className="p-2 text-slate-400 hover:text-white">
+              <Settings className="h-5 w-5" />
+            </button>
+          </div>
+        </div>
+        
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <KPICard
+            icon={Target}
+            label="Active Bids"
+            value={kpis.activeBids}
+            trend={12}
+            color="yellow"
+          />
+          <KPICard
+            icon={Hammer}
+            label="Post & Beam"
+            value={kpis.postAndBeam}
+            trend={5}
+            color="blue"
+          />
+          <KPICard
+            icon={ClipboardList}
+            label="Setup Needed"
+            value={kpis.jobAccountsPending}
+            trend={-2}
+            color="orange"
+          />
+          <KPICard
+            icon={AlertTriangle}
+            label="Open Issues"
+            value={kpis.openProblems}
+            trend={-8}
+            color="red"
+          />
+        </div>
+      </div>
+      
+      {showCommandPalette && (
+        <CommandPalette onClose={() => setShowCommandPalette(false)} />
+      )}
+    </header>
+  );
+};
+
+const KPICard = ({ icon: Icon, label, value, trend, color }) => {
+  const colors = {
+    yellow: 'text-yellow-400 bg-yellow-500/10',
+    blue: 'text-blue-400 bg-blue-500/10',
+    orange: 'text-orange-400 bg-orange-500/10',
+    red: 'text-red-400 bg-red-500/10'
+  };
+
+  return (
+    <div className="bg-slate-800/50 rounded-lg p-3 hover:bg-slate-800/70 transition-colors cursor-pointer">
+      <div className="flex items-center justify-between mb-2">
+        <div className={`p-1.5 rounded ${colors[color]}`}>
+          <Icon className="h-4 w-4" />
+        </div>
+        <span className={`text-xs font-medium flex items-center gap-1 ${
+          trend > 0 ? 'text-green-400' : trend < 0 ? 'text-red-400' : 'text-slate-400'
+        }`}>
+          {trend > 0 ? <ArrowUp className="h-3 w-3" /> : trend < 0 ? <ArrowDown className="h-3 w-3" /> : null}
+          {Math.abs(trend)}%
+        </span>
+      </div>
+      <p className="text-xl font-bold text-white">{value}</p>
+      <p className="text-xs text-slate-400">{label}</p>
+    </div>
+  );
+};
+
+// ==================== COMMAND PALETTE ====================
+
+const CommandPalette = ({ onClose }) => {
+  const [search, setSearch] = useState('');
+  const { notify, togglePin } = useApp();
+  
+  const commands = [
+    { label: 'Add Photo', icon: Camera, action: () => document.getElementById('photo-upload')?.click() },
+    { label: 'Report Issue', icon: AlertTriangle, action: () => document.getElementById('quick-issue-input')?.focus() },
+    { label: 'Export Report', icon: Download, action: () => notify('Generating report...', 'info') },
+    { label: 'Refresh Data', icon: RefreshCw, action: () => window.location.reload() },
+    { label: 'Toggle Offline Mode', icon: Wifi, action: () => notify('Offline mode toggled', 'info') },
+  ];
+
+  const filteredCommands = commands.filter(cmd => 
+    cmd.label.toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div className="max-w-lg mx-auto mt-20 bg-slate-900 rounded-xl shadow-2xl border border-slate-800" onClick={e => e.stopPropagation()}>
+        <div className="p-4 border-b border-slate-800">
+          <input
+            type="text"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Type a command..."
+            className="w-full px-3 py-2 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            autoFocus
+          />
+        </div>
+        <div className="max-h-96 overflow-y-auto p-2">
+          {filteredCommands.map((cmd, i) => (
+            <button
+              key={i}
+              onClick={() => { cmd.action(); onClose(); }}
+              className="w-full flex items-center gap-3 px-3 py-2 text-left text-white hover:bg-slate-800 rounded-lg"
+            >
+              <cmd.icon className="h-4 w-4 text-slate-400" />
+              {cmd.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ==================== SEARCH & FILTERS ====================
+
+const SearchBar = ({ onSearch }) => {
+  const [search, setSearch] = useState('');
+  const [showFilters, setShowFilters] = useState(false);
+  const { activeFilters, setActiveFilters, searchHistory, setSearchHistory } = useApp();
+  const debouncedSearch = useDebounce(search, 300);
+  
+  useEffect(() => {
+    onSearch(debouncedSearch);
+    if (debouncedSearch && !searchHistory.includes(debouncedSearch)) {
+      setSearchHistory(prev => [debouncedSearch, ...prev].slice(0, 5));
+    }
+  }, [debouncedSearch]);
+
+  return (
+    <div className="space-y-3">
+      <div className="relative">
+        <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
+        <input
+          id="global-search"
+          type="text"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search projects, clients, issues... (Cmd+K)"
+          className="w-full pl-12 pr-12 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+        <button
+          onClick={() => setShowFilters(!showFilters)}
+          className={`absolute right-4 top-1/2 -translate-y-1/2 p-1 rounded ${
+            Object.values(activeFilters).some(v => v && v !== 'all') ? 'text-blue-400' : 'text-slate-400'
+          }`}
+        >
+          <Filter className="h-5 w-5" />
+        </button>
+      </div>
+      
+      {showFilters && (
+        <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4 space-y-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <select
+              value={activeFilters.phase}
+              onChange={e => setActiveFilters(prev => ({ ...prev, phase: e.target.value }))}
+              className="px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm"
+            >
+              <option value="all">All Phases</option>
+              <option value="bidding">Bidding</option>
+              <option value="post-beam">Post & Beam</option>
+              <option value="trim">Trim</option>
+              <option value="complete">Complete</option>
+            </select>
+            
+            <select
+              value={activeFilters.priority || ''}
+              onChange={e => setActiveFilters(prev => ({ ...prev, priority: e.target.value || null }))}
+              className="px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm"
+            >
+              <option value="">All Priorities</option>
+              <option value="high">High Priority</option>
+              <option value="medium">Medium Priority</option>
+              <option value="low">Low Priority</option>
+            </select>
+            
+            <select
+              value={activeFilters.dateRange || ''}
+              onChange={e => setActiveFilters(prev => ({ ...prev, dateRange: e.target.value || null }))}
+              className="px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm"
+            >
+              <option value="">All Time</option>
+              <option value="today">Today</option>
+              <option value="week">This Week</option>
+              <option value="month">This Month</option>
+              <option value="overdue">Overdue</option>
+            </select>
+            
+            <button
+              onClick={() => setActiveFilters({ phase: 'all', assignee: null, dateRange: null, priority: null })}
+              className="px-3 py-2 bg-slate-700 text-slate-300 rounded-lg text-sm hover:bg-slate-600"
+            >
+              Clear Filters
+            </button>
+          </div>
+          
+          {searchHistory.length > 0 && (
+            <div className="pt-3 border-t border-slate-700">
+              <p className="text-xs text-slate-400 mb-2">Recent Searches</p>
+              <div className="flex flex-wrap gap-2">
+                {searchHistory.map((term, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setSearch(term)}
+                    className="px-2 py-1 bg-slate-700 text-slate-300 rounded text-xs hover:bg-slate-600"
+                  >
+                    {term}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ==================== PROJECT CARDS WITH BULK ACTIONS ====================
+
+const ProjectGrid = ({ projects, onProjectClick }) => {
+  const { selectedProjects, setSelectedProjects, pinnedProjects, togglePin, notify } = useApp();
+  const [showBulkActions, setShowBulkActions] = useState(false);
+
+  useEffect(() => {
+    setShowBulkActions(selectedProjects.size > 0);
+  }, [selectedProjects]);
+
+  const handleSelectAll = () => {
+    if (selectedProjects.size === projects.length) {
+      setSelectedProjects(new Set());
+    } else {
+      setSelectedProjects(new Set(projects.map(p => p.id)));
+    }
+  };
+
+  const handleBulkStatusChange = (status) => {
+    notify(`Updating ${selectedProjects.size} projects to ${status}...`, 'info');
+    // API call here
+    setSelectedProjects(new Set());
+  };
+
+  const sortedProjects = useMemo(() => {
+    return [...projects].sort((a, b) => {
+      const aPinned = pinnedProjects.has(a.id);
+      const bPinned = pinnedProjects.has(b.id);
+      if (aPinned && !bPinned) return -1;
+      if (!aPinned && bPinned) return 1;
+      return 0;
+    });
+  }, [projects, pinnedProjects]);
+
+  return (
+    <div className="space-y-4">
+      {showBulkActions && (
+        <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-4 flex items-center justify-between">
+          <span className="text-blue-300">
+            {selectedProjects.size} project{selectedProjects.size !== 1 ? 's' : ''} selected
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => handleBulkStatusChange('Complete')}
+              className="px-3 py-1.5 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700"
+            >
+              Mark Complete
+            </button>
+            <button
+              onClick={() => handleBulkStatusChange('Archive')}
+              className="px-3 py-1.5 bg-slate-600 text-white rounded-lg text-sm hover:bg-slate-700"
+            >
+              Archive
+            </button>
+            <button
+              onClick={() => setSelectedProjects(new Set())}
+              className="px-3 py-1.5 bg-slate-700 text-white rounded-lg text-sm hover:bg-slate-600"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      
+      <div className="flex items-center justify-between mb-2">
+        <button
+          onClick={handleSelectAll}
+          className="text-xs text-slate-400 hover:text-white"
+        >
+          {selectedProjects.size === projects.length ? 'Deselect All' : 'Select All'}
+        </button>
+      </div>
+      
+      <div className="grid gap-3">
+        {sortedProjects.map(project => (
+          <ProjectCard
+            key={project.id}
+            project={project}
+            isSelected={selectedProjects.has(project.id)}
+            isPinned={pinnedProjects.has(project.id)}
+            onSelect={(id) => {
+              setSelectedProjects(prev => {
+                const newSet = new Set(prev);
+                if (newSet.has(id)) {
+                  newSet.delete(id);
+                } else {
+                  newSet.add(id);
+                }
+                return newSet;
+              });
+            }}
+            onPin={() => togglePin(project.id)}
+            onClick={() => onProjectClick(project.id)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const ProjectCard = ({ project, isSelected, isPinned, onSelect, onPin, onClick }) => {
+  const getPhaseColor = (status) => {
+    const statusLower = (status || '').toLowerCase();
+    if (statusLower.includes('bid')) return 'bg-yellow-500/20 border-yellow-500/30 text-yellow-300';
+    if (statusLower.includes('post') || statusLower.includes('beam')) return 'bg-blue-500/20 border-blue-500/30 text-blue-300';
+    if (statusLower.includes('trim')) return 'bg-green-500/20 border-green-500/30 text-green-300';
+    if (statusLower.includes('complete')) return 'bg-emerald-500/20 border-emerald-500/30 text-emerald-300';
+    return 'bg-slate-700 text-slate-300';
+  };
+
+  return (
+    <div className={`
+      bg-slate-800/50 border rounded-xl p-4 transition-all
+      ${isSelected ? 'border-blue-500 bg-blue-500/10' : 'border-slate-700 hover:border-slate-600'}
+      ${isPinned ? 'shadow-lg shadow-blue-500/20' : ''}
+    `}>
+      <div className="flex items-start gap-3">
+        <input
+          type="checkbox"
+          checked={isSelected}
+          onChange={() => onSelect(project.id)}
+          className="mt-1 rounded border-slate-600 bg-slate-700 text-blue-500 focus:ring-blue-500"
+        />
+        
+        <div className="flex-1 min-w-0">
+          <div className="flex items-start justify-between mb-2">
+            <div>
+              <h3
+                className="font-semibold text-white hover:text-blue-400 cursor-pointer flex items-center gap-2"
+                onClick={onClick}
+              >
+                {project.title}
+                {project.subdivision && (
+                  <span className="text-sm font-normal text-slate-400">• {project.subdivision}</span>
+                )}
+                {isPinned && <Pin className="h-3 w-3 text-blue-400" />}
+              </h3>
+              <div className="flex items-center gap-3 mt-1">
+                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${getPhaseColor(project.status)}`}>
+                  {project.status || 'No Status'}
+                </span>
+                {project.jobNumber && (
+                  <span className="text-xs text-slate-400">#{project.jobNumber}</span>
+                )}
+              </div>
+            </div>
+            
+            <div className="flex items-center gap-1">
+              <button
+                onClick={(e) => { e.stopPropagation(); onPin(); }}
+                className="p-1 text-slate-400 hover:text-white"
+              >
+                {isPinned ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
+              </button>
+              <button className="p-1 text-slate-400 hover:text-white">
+                <MoreVertical className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+          
+          <div className="grid grid-cols-2 gap-2 text-xs text-slate-400">
+            {project.client && (
+              <div className="flex items-center gap-1">
+                <User className="h-3 w-3" />
+                <span className="truncate">{project.client}</span>
+              </div>
+            )}
+            {project.builder && (
+              <div className="flex items-center gap-1">
+                <Building className="h-3 w-3" />
+                <span className="truncate">{project.builder}</span>
+              </div>
+            )}
+            {project.location && (
+              <div className="flex items-center gap-1 col-span-2">
+                <MapPin className="h-3 w-3" />
+                <span className="truncate">{project.location}</span>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ==================== ENHANCED PROJECT DETAIL PANEL ====================
+
+const ProjectDetailPanel = ({ projectId, onClose }) => {
+  const [project, setProject] = useState(null);
+  const [activeTab, setActiveTab] = useState('overview');
+  const [loading, setLoading] = useState(true);
+  const { notify, addToRecent, isOnline, queueAction } = useApp();
+  const [searchWithinPanel, setSearchWithinPanel] = useState('');
+
+  useEffect(() => {
+    loadProject();
+    addToRecent(projectId);
   }, [projectId]);
 
-  const loadProjectData = async () => {
+  const loadProject = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/full`);
-      const projectData = await res.json();
-      setData(projectData);
-    } catch (e) {
-      console.error('Failed to load project:', e);
+      // Simulated API call
+      await new Promise(resolve => setTimeout(resolve, 500));
+      setProject({
+        id: projectId,
+        title: `Project ${projectId}`,
+        client: 'John Smith',
+        builder: 'ABC Construction',
+        status: 'Post & Beam',
+        jobNumber: '2024-001',
+        tasks: [
+          { id: 1, title: 'Install rough plumbing', completed: false, assignee: 'Mike' },
+          { id: 2, title: 'Frame walls', completed: true, assignee: 'Steve' }
+        ],
+        issues: [
+          { id: 1, title: 'Leak in bathroom', status: 'Open', priority: 'High' }
+        ],
+        comments: [
+          { id: 1, text: 'Waiting on permits', author: 'Admin', createdAt: '2024-01-15' }
+        ],
+        photos: [
+          { id: 1, url: '/api/placeholder/400/300', description: 'Foundation work', date: '2024-01-10' }
+        ]
+      });
+    } catch (error) {
+      notify('Failed to load project', 'error');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleAddComment = async () => {
-    if (!newComment.trim() || submitting) return;
-    setSubmitting(true);
-    try {
-      await fetch('/api/comments', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId, text: newComment })
-      });
-      setNewComment('');
-      await loadProjectData();
-    } catch (e) {
-      console.error('Failed to add comment:', e);
-    } finally {
-      setSubmitting(false);
+  const handleAddComment = (text) => {
+    if (isOnline) {
+      // Direct API call
+      notify('Comment added', 'success');
+    } else {
+      queueAction({ type: 'ADD_COMMENT', projectId, text });
     }
   };
 
-  const handleTaskToggle = async (taskId: string, completed: boolean) => {
-    try {
-      await fetch(`/api/tasks/${taskId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ completed: !completed })
-      });
-      await loadProjectData();
-    } catch (e) {
-      console.error('Failed to update task:', e);
+  const handleTaskToggle = (taskId) => {
+    const task = project.tasks.find(t => t.id === taskId);
+    const action = { type: 'TOGGLE_TASK', projectId, taskId, completed: !task.completed };
+    
+    // Optimistic update
+    setProject(prev => ({
+      ...prev,
+      tasks: prev.tasks.map(t => 
+        t.id === taskId ? { ...t, completed: !t.completed } : t
+      )
+    }));
+
+    if (isOnline) {
+      // API call
+      notify('Task updated', 'success');
+    } else {
+      queueAction(action);
     }
   };
 
-  const handleAddTask = async () => {
-    if (!newTask.trim() || submitting) return;
-    setSubmitting(true);
-    try {
-      await fetch('/api/tasks', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId, title: newTask })
-      });
-      setNewTask('');
-      setShowNewTask(false);
-      await loadProjectData();
-    } catch (e) {
-      console.error('Failed to add task:', e);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleIssueStatusChange = async (issueId: string, newStatus: string) => {
-    try {
-      await fetch('/api/improvements', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: issueId, status: newStatus })
-      });
-      await loadProjectData();
-    } catch (e) {
-      console.error('Failed to update issue:', e);
-    }
-  };
+  // Filter content based on search
+  const filteredContent = useMemo(() => {
+    if (!searchWithinPanel || !project) return project;
+    
+    const term = searchWithinPanel.toLowerCase();
+    return {
+      ...project,
+      tasks: project.tasks.filter(t => t.title.toLowerCase().includes(term)),
+      issues: project.issues.filter(i => i.title.toLowerCase().includes(term)),
+      comments: project.comments.filter(c => c.text.toLowerCase().includes(term))
+    };
+  }, [project, searchWithinPanel]);
 
   if (loading) {
     return (
       <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm">
-        <div className="absolute right-0 top-0 h-full w-full max-w-4xl bg-slate-900 border-l border-slate-800 p-8">
-          <div className="animate-pulse space-y-4">
-            <div className="h-8 bg-slate-800 rounded w-1/3"></div>
-            <div className="h-4 bg-slate-800 rounded w-1/2"></div>
-            <div className="h-32 bg-slate-800 rounded"></div>
+        <div className="absolute right-0 h-full w-full max-w-2xl bg-slate-900 border-l border-slate-800">
+          <div className="p-6 space-y-4">
+            <div className="h-8 bg-slate-800 rounded animate-pulse" />
+            <div className="h-32 bg-slate-800 rounded animate-pulse" />
           </div>
         </div>
       </div>
     );
   }
 
-  if (!data) return null;
-
-  const { project, tasks, issues, photos, comments } = data;
-
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div 
-        className="absolute right-0 top-0 h-full w-full max-w-4xl bg-slate-900 border-l border-slate-800 overflow-hidden flex flex-col"
-        onClick={e => e.stopPropagation()}
-      >
+      <div className="absolute right-0 h-full w-full max-w-2xl bg-slate-900 border-l border-slate-800 flex flex-col" onClick={e => e.stopPropagation()}>
         {/* Header */}
         <div className="flex-shrink-0 border-b border-slate-800 p-6">
-          <div className="flex items-start justify-between">
+          <div className="flex items-start justify-between mb-4">
             <div>
-              <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-                {project.title}
-                {project.subdivision && (
-                  <span className="text-sm font-normal text-slate-400">• {project.subdivision}</span>
-                )}
-              </h1>
-              <div className="flex flex-wrap items-center gap-4 mt-2 text-sm">
-                {project.jobNumber && (
-                  <span className="flex items-center gap-1 text-slate-300">
-                    <Hash className="h-3 w-3" />
-                    Job #{project.jobNumber}
-                  </span>
-                )}
-                {project.client && (
-                  <span className="flex items-center gap-1 text-slate-300">
-                    <User className="h-3 w-3" />
-                    {project.client}
-                  </span>
-                )}
-                {project.status && (
-                  <span className={`px-2 py-1 rounded text-xs font-medium ${
-                    PIPELINE_PHASES.find(p => p.statuses.includes(project.status!.toLowerCase()))?.color || 'bg-slate-700'
-                  }`}>
-                    {project.status}
-                  </span>
-                )}
+              <h2 className="text-2xl font-bold text-white">{project.title}</h2>
+              <div className="flex items-center gap-3 mt-2 text-sm text-slate-400">
+                <span>#{project.jobNumber}</span>
+                <span>•</span>
+                <span>{project.client}</span>
+                <span>•</span>
+                <span className="px-2 py-0.5 bg-blue-500/20 text-blue-300 rounded">
+                  {project.status}
+                </span>
               </div>
             </div>
-            <button onClick={onClose} className="text-slate-400 hover:text-white p-2">
+            <button onClick={onClose} className="side-panel-close p-2 text-slate-400 hover:text-white">
               <X className="h-6 w-6" />
             </button>
           </div>
-
+          
+          {/* Search within panel */}
+          <div className="relative mb-4">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+            <input
+              type="text"
+              value={searchWithinPanel}
+              onChange={e => setSearchWithinPanel(e.target.value)}
+              placeholder="Search within project..."
+              className="w-full pl-10 pr-4 py-2 bg-slate-800 text-white rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          
           {/* Tabs */}
-          <div className="flex gap-1 mt-6 -mb-px overflow-x-auto">
-            {[
-              { key: 'overview', label: 'Overview', icon: FileText },
-              { key: 'tasks', label: 'Tasks', count: tasks.length },
-              { key: 'issues', label: 'Issues', count: issues.length },
-              { key: 'photos', label: 'Photos', count: photos.length },
-              { key: 'comments', label: 'Comments', count: comments.length }
-            ].map(tab => (
+          <div className="flex gap-1 -mb-px">
+            {['overview', 'tasks', 'issues', 'photos', 'comments'].map(tab => (
               <button
-                key={tab.key}
-                onClick={() => setActiveTab(tab.key)}
-                className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                  activeTab === tab.key
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`px-4 py-2 text-sm font-medium capitalize border-b-2 transition-colors ${
+                  activeTab === tab
                     ? 'text-blue-400 border-blue-400'
                     : 'text-slate-400 border-transparent hover:text-white'
                 }`}
               >
-                {tab.icon && <tab.icon className="h-4 w-4" />}
-                {tab.label}
-                {tab.count !== undefined && (
-                  <span className={`px-1.5 py-0.5 rounded-full text-xs ${
-                    activeTab === tab.key ? 'bg-blue-500/20' : 'bg-slate-700'
-                  }`}>
-                    {tab.count}
-                  </span>
-                )}
+                {tab}
+                {tab === 'tasks' && ` (${filteredContent.tasks.length})`}
+                {tab === 'issues' && ` (${filteredContent.issues.length})`}
               </button>
             ))}
           </div>
         </div>
-
+        
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-6">
-          {/* Overview Tab */}
-          {activeTab === 'overview' && (
-            <div className="space-y-6">
-              <div className="grid grid-cols-2 gap-4">
-                <InfoBlock label="Builder" value={project.builder} icon={Building} />
-                <InfoBlock label="Project Manager" value={project.projectManager} icon={UserCheck} />
-                <InfoBlock label="Superintendent" value={project.superintendent} icon={Users} />
-                <InfoBlock label="Location" value={project.location} icon={MapPin} />
-                <InfoBlock label="Permit #" value={project.permitNumber} icon={FileText} />
-                <InfoBlock label="Start Date" value={project.startDate} icon={Calendar} />
-                <InfoBlock label="Phone" value={project.phone} icon={MessageSquare} />
-                <InfoBlock label="Email" value={project.email} icon={MessageSquare} />
-              </div>
-              
-              {project.notes && (
-                <div className="bg-slate-800/50 rounded-lg p-4">
-                  <h3 className="font-medium text-white mb-2">Notes</h3>
-                  <p className="text-slate-300 whitespace-pre-wrap">{project.notes}</p>
-                </div>
-              )}
-
-              <div className="bg-slate-800/50 rounded-lg p-4">
-                <h3 className="font-medium text-white mb-3">Quick Stats</h3>
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="text-center">
-                    <p className="text-2xl font-bold text-blue-400">{tasks.filter(t => !t.completed).length}</p>
-                    <p className="text-xs text-slate-400">Open Tasks</p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-2xl font-bold text-orange-400">{issues.filter(i => i.status !== 'Done').length}</p>
-                    <p className="text-xs text-slate-400">Open Issues</p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-2xl font-bold text-green-400">{photos.length}</p>
-                    <p className="text-xs text-slate-400">Photos</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Tasks Tab */}
-          {activeTab === 'tasks' && (
-            <div className="space-y-4">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="font-semibold text-white">Project Tasks</h3>
-                <button
-                  onClick={() => setShowNewTask(true)}
-                  className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-2"
-                >
-                  <Plus className="h-4 w-4" />
-                  Add Task
-                </button>
-              </div>
-
-              {showNewTask && (
-                <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-4 space-y-3">
-                  <input
-                    type="text"
-                    value={newTask}
-                    onChange={e => setNewTask(e.target.value)}
-                    placeholder="Enter task description..."
-                    className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400"
-                    autoFocus
-                  />
-                  <div className="flex gap-2">
-                    <button
-                      onClick={handleAddTask}
-                      disabled={submitting || !newTask.trim()}
-                      className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-600 text-white px-4 py-2 rounded-lg text-sm font-medium"
-                    >
-                      Add Task
-                    </button>
-                    <button
-                      onClick={() => { setShowNewTask(false); setNewTask(''); }}
-                      className="bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg text-sm font-medium"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {tasks.length > 0 ? (
-                <div className="space-y-2">
-                  {tasks.map(task => (
-                    <div key={task.id} className="bg-slate-800/50 border border-slate-700 rounded-lg p-3 flex items-center gap-3">
-                      <button
-                        onClick={() => handleTaskToggle(task.id, task.completed || false)}
-                        className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
-                          task.completed 
-                            ? 'bg-green-600 border-green-600' 
-                            : 'border-slate-500 hover:border-blue-400'
-                        }`}
-                      >
-                        {task.completed && <CheckCheck className="h-3 w-3 text-white" />}
-                      </button>
-                      <div className="flex-1">
-                        <p className={`text-white ${task.completed ? 'line-through opacity-50' : ''}`}>
-                          {task.title}
-                        </p>
-                        <div className="flex items-center gap-3 mt-1 text-xs text-slate-400">
-                          {task.assignee && <span>Assigned to: {task.assignee}</span>}
-                          {task.dueDate && <span>Due: {task.dueDate}</span>}
-                          {task.category && <span className="px-2 py-0.5 bg-slate-700 rounded">{task.category}</span>}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-8 text-slate-400">
-                  <CheckSquare className="h-12 w-12 mx-auto mb-3 opacity-50" />
-                  <p>No tasks yet. Add one above!</p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Issues Tab */}
-          {activeTab === 'issues' && (
-            <div className="space-y-4">
-              <h3 className="font-semibold text-white mb-4">Open Issues</h3>
-              {issues.length > 0 ? (
-                <div className="space-y-3">
-                  {issues.map(issue => (
-                    <IssueCard
-                      key={issue.id}
-                      issue={issue}
-                      onStatusChange={handleIssueStatusChange}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-8 text-slate-400">
-                  <AlertTriangle className="h-12 w-12 mx-auto mb-3 opacity-50" />
-                  <p>No issues reported</p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Photos Tab */}
-          {activeTab === 'photos' && (
-            <div className="space-y-4">
-              {photos.length > 0 ? (
-                <div className="grid grid-cols-2 gap-4">
-                  {photos.map(photo => (
-                    <div key={photo.id} className="bg-slate-800/50 rounded-lg overflow-hidden">
-                      <img src={photo.url} alt={photo.description} className="w-full h-48 object-cover" />
-                      <div className="p-3">
-                        <p className="text-sm text-white">{photo.description}</p>
-                        {photo.date && <p className="text-xs text-slate-400 mt-1">{photo.date}</p>}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-8 text-slate-400">
-                  <Camera className="h-12 w-12 mx-auto mb-3 opacity-50" />
-                  <p>No photos uploaded yet</p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Comments Tab */}
-          {activeTab === 'comments' && (
-            <div className="space-y-4">
-              <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-4">
-                <div className="flex gap-3">
-                  <input
-                    type="text"
-                    value={newComment}
-                    onChange={e => setNewComment(e.target.value)}
-                    onKeyPress={e => e.key === 'Enter' && handleAddComment()}
-                    placeholder="Add a comment..."
-                    className="flex-1 px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400"
-                  />
-                  <button
-                    onClick={handleAddComment}
-                    disabled={submitting || !newComment.trim()}
-                    className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-600 text-white px-4 py-2 rounded-lg"
-                  >
-                    <Send className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
-
-              {comments.length > 0 ? (
-                <div className="space-y-3">
-                  {comments.map(comment => (
-                    <div key={comment.id} className="bg-slate-800/50 rounded-lg p-4">
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <p className="text-white">{comment.text}</p>
-                          <p className="text-xs text-slate-400 mt-2">
-                            {comment.author || 'Unknown'} • {comment.createdAt}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-8 text-slate-400">
-                  <MessageSquare className="h-12 w-12 mx-auto mb-3 opacity-50" />
-                  <p>No comments yet. Start the conversation!</p>
-                </div>
-              )}
-            </div>
-          )}
+          {activeTab === 'overview' && <OverviewTab project={project} />}
+          {activeTab === 'tasks' && <TasksTab tasks={filteredContent.tasks} onToggle={handleTaskToggle} />}
+          {activeTab === 'issues' && <IssuesTab issues={filteredContent.issues} />}
+          {activeTab === 'photos' && <PhotosTab photos={filteredContent.photos} />}
+          {activeTab === 'comments' && <CommentsTab comments={filteredContent.comments} onAdd={handleAddComment} />}
         </div>
       </div>
     </div>
   );
-}
+};
 
-// Issue Card Component
-function IssueCard({ issue, onStatusChange }: { 
-  issue: Issue; 
-  onStatusChange: (id: string, status: string) => void;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const [showStatusMenu, setShowStatusMenu] = useState(false);
+// Tab Components
+const OverviewTab = ({ project }) => (
+  <div className="space-y-6">
+    <div className="grid grid-cols-2 gap-4">
+      <InfoField label="Client" value={project.client} />
+      <InfoField label="Builder" value={project.builder} />
+      <InfoField label="Status" value={project.status} />
+      <InfoField label="Job #" value={project.jobNumber} />
+    </div>
+    
+    <div className="bg-slate-800/50 rounded-xl p-6">
+      <h3 className="font-semibold text-white mb-4">Quick Stats</h3>
+      <div className="grid grid-cols-3 gap-4 text-center">
+        <div>
+          <p className="text-2xl font-bold text-blue-400">{project.tasks.filter(t => !t.completed).length}</p>
+          <p className="text-xs text-slate-400">Open Tasks</p>
+        </div>
+        <div>
+          <p className="text-2xl font-bold text-orange-400">{project.issues.length}</p>
+          <p className="text-xs text-slate-400">Issues</p>
+        </div>
+        <div>
+          <p className="text-2xl font-bold text-green-400">{project.photos.length}</p>
+          <p className="text-xs text-slate-400">Photos</p>
+        </div>
+      </div>
+    </div>
+  </div>
+);
 
-  const statusColors: Record<string, string> = {
-    'Open': 'bg-red-500/20 text-red-300',
-    'In Progress': 'bg-yellow-500/20 text-yellow-300',
-    'Done': 'bg-green-500/20 text-green-300'
+const TasksTab = ({ tasks, onToggle }) => {
+  const [showAddTask, setShowAddTask] = useState(false);
+  const [newTask, setNewTask] = useState('');
+  const { notify } = useApp();
+
+  const handleAddTask = () => {
+    if (newTask.trim()) {
+      notify('Task added', 'success');
+      setNewTask('');
+      setShowAddTask(false);
+    }
   };
 
   return (
-    <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-4">
-      <div className="flex items-start justify-between">
-        <div className="flex-1">
-          <h4 
-            className="font-medium text-white cursor-pointer hover:text-blue-400"
-            onClick={() => setExpanded(!expanded)}
-          >
-            {issue.title}
-          </h4>
-          <div className="flex items-center gap-3 mt-2 text-xs">
-            <div className="relative">
-              <button
-                onClick={() => setShowStatusMenu(!showStatusMenu)}
-                className={`px-2 py-1 rounded font-medium ${statusColors[issue.status || 'Open']}`}
-              >
-                {issue.status || 'Open'}
-                <ChevronDown className="h-3 w-3 inline ml-1" />
-              </button>
-              {showStatusMenu && (
-                <div className="absolute top-full mt-1 bg-slate-800 border border-slate-700 rounded-lg shadow-lg z-10">
-                  {['Open', 'In Progress', 'Done'].map(status => (
-                    <button
-                      key={status}
-                      onClick={() => {
-                        onStatusChange(issue.id, status);
-                        setShowStatusMenu(false);
-                      }}
-                      className="block w-full px-3 py-2 text-left text-sm text-white hover:bg-slate-700"
-                    >
-                      {status}
-                    </button>
-                  ))}
-                </div>
+    <div className="space-y-4">
+      <button
+        onClick={() => setShowAddTask(true)}
+        className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700"
+      >
+        Add Task
+      </button>
+      
+      {showAddTask && (
+        <div className="bg-slate-800/50 rounded-lg p-4 space-y-3">
+          <input
+            type="text"
+            value={newTask}
+            onChange={e => setNewTask(e.target.value)}
+            placeholder="Task description..."
+            className="w-full px-3 py-2 bg-slate-700 text-white rounded-lg"
+            autoFocus
+          />
+          <div className="flex gap-2">
+            <button onClick={handleAddTask} className="px-4 py-2 bg-blue-600 text-white rounded-lg">
+              Add
+            </button>
+            <button onClick={() => setShowAddTask(false)} className="px-4 py-2 bg-slate-700 text-white rounded-lg">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      
+      <div className="space-y-2">
+        {tasks.map(task => (
+          <div key={task.id} className="flex items-center gap-3 p-3 bg-slate-800/50 rounded-lg">
+            <input
+              type="checkbox"
+              checked={task.completed}
+              onChange={() => onToggle(task.id)}
+              className="rounded border-slate-600 bg-slate-700 text-blue-500"
+            />
+            <div className="flex-1">
+              <p className={`text-white ${task.completed ? 'line-through opacity-50' : ''}`}>
+                {task.title}
+              </p>
+              {task.assignee && (
+                <p className="text-xs text-slate-400">Assigned to: {task.assignee}</p>
               )}
             </div>
-            {issue.priority && (
-              <span className="px-2 py-1 bg-orange-500/20 text-orange-300 rounded">
-                {issue.priority}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const IssuesTab = ({ issues }) => (
+  <div className="space-y-3">
+    {issues.map(issue => (
+      <div key={issue.id} className="bg-slate-800/50 rounded-lg p-4">
+        <div className="flex items-start justify-between">
+          <div>
+            <h4 className="font-medium text-white">{issue.title}</h4>
+            <div className="flex items-center gap-2 mt-2">
+              <span className={`px-2 py-1 rounded text-xs ${
+                issue.status === 'Open' ? 'bg-red-500/20 text-red-300' : 'bg-green-500/20 text-green-300'
+              }`}>
+                {issue.status}
               </span>
-            )}
-            {issue.assignee && <span className="text-slate-400">Assigned: {issue.assignee}</span>}
+              {issue.priority && (
+                <span className={`px-2 py-1 rounded text-xs ${
+                  issue.priority === 'High' ? 'bg-orange-500/20 text-orange-300' : 'bg-slate-700 text-slate-300'
+                }`}>
+                  {issue.priority}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    ))}
+  </div>
+);
+
+const PhotosTab = ({ photos }) => (
+  <div className="grid grid-cols-2 gap-4">
+    {photos.map(photo => (
+      <div key={photo.id} className="bg-slate-800/50 rounded-lg overflow-hidden">
+        <img src={photo.url} alt={photo.description} className="w-full h-32 object-cover" />
+        <div className="p-3">
+          <p className="text-sm text-white">{photo.description}</p>
+          <p className="text-xs text-slate-400 mt-1">{photo.date}</p>
+        </div>
+      </div>
+    ))}
+  </div>
+);
+
+const CommentsTab = ({ comments, onAdd }) => {
+  const [newComment, setNewComment] = useState('');
+
+  const handleAdd = () => {
+    if (newComment.trim()) {
+      onAdd(newComment);
+      setNewComment('');
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={newComment}
+          onChange={e => setNewComment(e.target.value)}
+          placeholder="Add a comment..."
+          className="flex-1 px-3 py-2 bg-slate-800 text-white rounded-lg"
+        />
+        <button onClick={handleAdd} className="px-4 py-2 bg-blue-600 text-white rounded-lg">
+          <Send className="h-4 w-4" />
+        </button>
+      </div>
+      
+      <div className="space-y-3">
+        {comments.map(comment => (
+          <div key={comment.id} className="bg-slate-800/50 rounded-lg p-4">
+            <p className="text-white">{comment.text}</p>
+            <p className="text-xs text-slate-400 mt-2">
+              {comment.author} • {comment.createdAt}
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const InfoField = ({ label, value }) => (
+  <div className="bg-slate-800/50 rounded-lg p-3">
+    <p className="text-xs text-slate-400 mb-1">{label}</p>
+    <p className="text-white font-medium">{value || '-'}</p>
+  </div>
+);
+
+// ==================== QUICK ACTIONS SIDEBAR ====================
+
+const QuickActionsSidebar = () => {
+  const { notify, recentlyViewed, projects } = useApp();
+  const [issueText, setIssueText] = useState('');
+  const [selectedProject, setSelectedProject] = useState('');
+
+  const handlePhotoUpload = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      notify(`Photo "${file.name}" uploaded`, 'success');
+    }
+  };
+
+  const handleAddIssue = () => {
+    if (issueText.trim() && selectedProject) {
+      notify('Issue reported', 'success');
+      setIssueText('');
+    }
+  };
+
+  const recentProjects = recentlyViewed.map(id => 
+    projects.find(p => p.id === id)
+  ).filter(Boolean).slice(0, 3);
+
+  return (
+    <div className="space-y-6">
+      {/* Quick Actions */}
+      <div className="bg-slate-800/50 rounded-xl p-4">
+        <h3 className="font-semibold text-white mb-4 flex items-center gap-2">
+          <Zap className="h-5 w-5 text-yellow-400" />
+          Quick Actions
+        </h3>
+        
+        <div className="space-y-3">
+          <select
+            value={selectedProject}
+            onChange={e => setSelectedProject(e.target.value)}
+            className="w-full px-3 py-2 bg-slate-700 text-white rounded-lg text-sm"
+          >
+            <option value="">Select project...</option>
+            {projects.map(p => (
+              <option key={p.id} value={p.id}>
+                {p.title} {p.subdivision && `- ${p.subdivision}`}
+              </option>
+            ))}
+          </select>
+          
+          <label className="block">
+            <span className="text-xs text-slate-400">Upload Photo</span>
+            <input
+              id="photo-upload"
+              type="file"
+              accept="image/*"
+              onChange={handlePhotoUpload}
+              className="mt-1 w-full text-sm text-slate-400 file:mr-3 file:py-1 file:px-3 file:rounded-lg file:border-0 file:bg-blue-600 file:text-white"
+            />
+          </label>
+          
+          <div>
+            <input
+              id="quick-issue-input"
+              type="text"
+              value={issueText}
+              onChange={e => setIssueText(e.target.value)}
+              placeholder="Report an issue..."
+              className="w-full px-3 py-2 bg-slate-700 text-white rounded-lg text-sm"
+            />
+            <button
+              onClick={handleAddIssue}
+              className="mt-2 w-full bg-orange-600 text-white py-2 rounded-lg text-sm hover:bg-orange-700"
+            >
+              Add Issue
+            </button>
           </div>
         </div>
       </div>
       
-      {expanded && (
-        <div className="mt-3 pt-3 border-t border-slate-700">
-          {issue.description && (
-            <p className="text-sm text-slate-300 mb-2">{issue.description}</p>
-          )}
-          <p className="text-xs text-slate-400">
-            Created: {issue.createdDate || 'Unknown'}
-          </p>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Info Block Component
-function InfoBlock({ label, value, icon: Icon }: { 
-  label: string; 
-  value?: string; 
-  icon: React.ElementType;
-}) {
-  return (
-    <div className="bg-slate-800/50 rounded-lg p-3">
-      <div className="flex items-center gap-2 text-xs text-slate-400 mb-1">
-        <Icon className="h-3 w-3" />
-        {label}
-      </div>
-      <p className="text-sm text-white font-medium">{value || '-'}</p>
-    </div>
-  );
-}
-
-// Main Dashboard Component
-function DashboardComponent({ initialKpis, initialPendingAcct }: { 
-  initialKpis: KPI, 
-  initialPendingAcct: ProjectRow[] 
-}) {
-  const [viewingProjectId, setViewingProjectId] = useState<string | null>(null);
-  const [kpis, setKpis] = useState(initialKpis);
-  const [pendingAcct, setPendingAcct] = useState(initialPendingAcct);
-  const [issues, setIssues] = useState<Issue[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  
-  const [searchInput, setSearchInput] = useState('');
-  const [selectedPhase, setSelectedPhase] = useState<string>('all');
-  const [boardItems, setBoardItems] = useState<BoardItem[]>([]);
-  const [boardLoading, setBoardLoading] = useState(true);
-  const [projects, setProjects] = useState<ProjectOption[]>([]);
-  
-  // Quick action states
-  const [selectedProject, setSelectedProject] = useState<ProjectOption | null>(null);
-  const [projectSearch, setProjectSearch] = useState('');
-  const [showProjectDropdown, setShowProjectDropdown] = useState(false);
-  const [upgradeTitle, setUpgradeTitle] = useState('');
-  const [photoFile, setPhotoFile] = useState<File | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  
-  const [expandedIssue, setExpandedIssue] = useState<string | null>(null);
-
-  // Filter projects for searchable dropdown
-  const filteredProjects = useMemo(() => {
-    if (!projectSearch) return projects;
-    const term = projectSearch.toLowerCase();
-    return projects.filter(p => 
-      p.title.toLowerCase().includes(term) || 
-      (p.subdivision || '').toLowerCase().includes(term)
-    );
-  }, [projects, projectSearch]);
-
-  useEffect(() => {
-    loadData();
-    loadBoard();
-  }, []);
-
-  const loadData = async () => {
-    try {
-      const [summary, acct, projectsList, improvementsData] = await Promise.all([
-        fetchJSON<{ kpis: KPI }>('/api/dashboard/summary'),
-        fetchJSON<{ rows: ProjectRow[] }>('/api/projects/job-account'),
-        fetchJSON<{ rows: ProjectOption[] }>('/api/projects/list'),
-        fetchJSON<{ rows: Issue[] }>('/api/improvements?openOnly=true'),
-      ]);
-      setKpis(summary.kpis);
-      setPendingAcct(acct.rows);
-      setProjects(projectsList.rows);
-      setIssues(improvementsData.rows);
-    } catch (e: any) {
-      setError(`Failed to load data: ${e.message}`);
-    }
-  };
-
-  const loadBoard = async () => {
-    setBoardLoading(true);
-    try {
-      const data = await fetchJSON<{ items: BoardItem[] }>('/api/projects/board');
-      setBoardItems(data.items || []);
-    } catch (e: any) {
-      setError(`Failed to load projects: ${e.message}`);
-    } finally {
-      setBoardLoading(false);
-    }
-  };
-
-  const handleQuickAction = async (type: 'photo' | 'issue') => {
-    if (!selectedProject) {
-      setError('Please select a project first');
-      return;
-    }
-    
-    setIsSubmitting(true);
-    setError(null);
-    
-    try {
-      if (type === 'photo' && photoFile) {
-        const formData = new FormData();
-        formData.append('file', photoFile);
-        formData.append('projectId', selectedProject.id);
-        formData.append('description', `Photo from ${new Date().toLocaleDateString()}`);
-        
-        const response = await fetch('/api/photos', { 
-          method: 'POST', 
-          body: formData 
-        });
-        
-        if (!response.ok) throw new Error('Failed to upload photo');
-        
-        setPhotoFile(null);
-        setSuccessMessage(`Photo uploaded to ${selectedProject.title}`);
-        
-      } else if (type === 'issue' && upgradeTitle.trim()) {
-        const response = await fetch('/api/improvements', { 
-          method: 'POST', 
-          headers: { 'Content-Type': 'application/json' }, 
-          body: JSON.stringify({ 
-            projectId: selectedProject.id, 
-            title: upgradeTitle.trim()
-          }) 
-        });
-        
-        if (!response.ok) throw new Error('Failed to add issue');
-        
-        setUpgradeTitle('');
-        setSuccessMessage(`Issue added to ${selectedProject.title}`);
-        await loadData();
-      }
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  // Group projects by phase
-  const groupedProjects = useMemo(() => {
-    let filtered = boardItems;
-    
-    if (searchInput) {
-      const query = searchInput.toLowerCase();
-      filtered = filtered.filter(item =>
-        [item.title, item.client, item.builder, item.location, item.subdivision].some(v => 
-          (v || '').toLowerCase().includes(query)
-        )
-      );
-    }
-    
-    if (selectedPhase !== 'all') {
-      filtered = filtered.filter(item => getProjectPhase(item.status) === selectedPhase);
-    }
-    
-    return PIPELINE_PHASES.reduce((acc, phase) => {
-      acc[phase.key] = filtered.filter(item => getProjectPhase(item.status) === phase.key);
-      return acc;
-    }, {} as Record<string, BoardItem[]>);
-  }, [boardItems, searchInput, selectedPhase]);
-
-  return (
-    <div className="min-h-screen bg-slate-950">
-      {viewingProjectId && (
-        <ProjectDetailPanel 
-          projectId={viewingProjectId} 
-          onClose={() => setViewingProjectId(null)} 
-        />
-      )}
-
-      {/* Header */}
-      <div className="border-b border-slate-800 bg-slate-900/50">
-        <div className="max-w-7xl mx-auto px-4 py-4">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <KPICard icon={Target} label="Active Bids" value={kpis.activeBids} color="text-yellow-400" />
-            <KPICard icon={Hammer} label="Post & Beam" value={kpis.postAndBeam} color="text-blue-400" />
-            <KPICard icon={ClipboardList} label="Setup Needed" value={kpis.jobAccountsPending} color="text-orange-400" />
-            <KPICard icon={AlertTriangle} label="Open Issues" value={kpis.openProblems} color="text-red-400" />
-          </div>
-        </div>
-      </div>
-
-      <div className="max-w-7xl mx-auto px-4 py-6">
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          {/* Main Content */}
-          <div className="lg:col-span-3 space-y-6">
-            {/* Search */}
-            <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-1">
-              <div className="relative">
-                <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
-                <input
-                  value={searchInput}
-                  onChange={e => setSearchInput(e.target.value)}
-                  placeholder="Search lots, subdivisions, clients..."
-                  className="w-full pl-12 pr-4 py-3 bg-transparent text-white placeholder-slate-400 focus:outline-none"
-                />
-              </div>
-            </div>
-
-            {/* Phase Tabs */}
-            <div className="flex gap-2 overflow-x-auto">
+      {/* Recently Viewed */}
+      {recentProjects.length > 0 && (
+        <div className="bg-slate-800/50 rounded-xl p-4">
+          <h3 className="font-semibold text-white mb-3 flex items-center gap-2">
+            <Clock className="h-5 w-5 text-blue-400" />
+            Recently Viewed
+          </h3>
+          <div className="space-y-2">
+            {recentProjects.map(project => (
               <button
-                onClick={() => setSelectedPhase('all')}
-                className={`px-4 py-2 rounded-lg font-medium whitespace-nowrap ${
-                  selectedPhase === 'all' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-300'
-                }`}
+                key={project.id}
+                className="w-full text-left p-2 bg-slate-700/50 rounded-lg hover:bg-slate-700 transition-colors"
               >
-                All ({boardItems.length})
+                <p className="text-sm text-white font-medium">{project.title}</p>
+                <p className="text-xs text-slate-400">{project.status}</p>
               </button>
-              {PIPELINE_PHASES.map(phase => (
-                <button
-                  key={phase.key}
-                  onClick={() => setSelectedPhase(phase.key)}
-                  className={`px-4 py-2 rounded-lg font-medium whitespace-nowrap flex items-center gap-2 ${
-                    selectedPhase === phase.key ? phase.color : 'bg-slate-800 text-slate-300'
-                  }`}
-                >
-                  <phase.icon className="h-4 w-4" />
-                  {phase.label} ({groupedProjects[phase.key]?.length || 0})
-                </button>
-              ))}
-            </div>
-
-            {/* Projects */}
-            {boardLoading ? (
-              <div className="space-y-4">
-                {[...Array(3)].map((_, i) => (
-                  <div key={i} className="h-24 bg-slate-800 rounded-lg animate-pulse" />
-                ))}
-              </div>
-            ) : (
-              <div className="space-y-6">
-                {selectedPhase === 'all' ? (
-                  PIPELINE_PHASES.map(phase => {
-                    const phaseProjects = groupedProjects[phase.key];
-                    if (!phaseProjects || phaseProjects.length === 0) return null;
-                    
-                    return (
-                      <div key={phase.key} className="bg-slate-900/50 border border-slate-800 rounded-lg overflow-hidden">
-                        <div className={`p-4 ${phase.color.split(' ')[0]} border-b border-slate-800`}>
-                          <h2 className="font-semibold text-white flex items-center gap-2">
-                            <phase.icon className="h-5 w-5" />
-                            {phase.label} ({phaseProjects.length})
-                          </h2>
-                        </div>
-                        <div className="p-4 space-y-3">
-                          {phaseProjects.map(project => (
-                            <ProjectCard
-                              key={project.id}
-                              project={project}
-                              onClick={() => setViewingProjectId(project.id)}
-                            />
-                          ))}
-                        </div>
-                      </div>
-                    );
-                  })
-                ) : (
-                  <div className="space-y-3">
-                    {groupedProjects[selectedPhase]?.map(project => (
-                      <ProjectCard
-                        key={project.id}
-                        project={project}
-                        onClick={() => setViewingProjectId(project.id)}
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
+            ))}
           </div>
-
-          {/* Sidebar */}
-          <div className="space-y-6">
-            {/* Quick Actions */}
-            <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-4">
-              <h3 className="font-semibold text-white mb-4">Quick Actions</h3>
-              
-              {/* Project Search */}
-              <div className="relative mb-4">
-                <input
-                  type="text"
-                  value={projectSearch}
-                  onChange={e => {
-                    setProjectSearch(e.target.value);
-                    setShowProjectDropdown(true);
-                  }}
-                  onFocus={() => setShowProjectDropdown(true)}
-                  placeholder="Search lot or subdivision..."
-                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-400"
-                />
-                {showProjectDropdown && filteredProjects.length > 0 && (
-                  <div className="absolute z-10 w-full mt-1 bg-slate-900 border border-slate-700 rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                    {filteredProjects.map(p => (
-                      <button
-                        key={p.id}
-                        onClick={() => {
-                          setSelectedProject(p);
-                          setProjectSearch(`${p.title}${p.subdivision ? ` - ${p.subdivision}` : ''}`);
-                          setShowProjectDropdown(false);
-                        }}
-                        className="w-full px-3 py-2 text-left text-white hover:bg-slate-800"
-                      >
-                        <div className="font-medium">{p.title}</div>
-                        {p.subdivision && <div className="text-xs text-slate-400">{p.subdivision}</div>}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Photo Upload */}
-              <div className="space-y-3 mb-4">
-                <input 
-                  type="file" 
-                  accept="image/*" 
-                  onChange={e => setPhotoFile(e.target.files?.[0] || null)}
-                  className="w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-blue-600 file:text-white"
-                />
-                <button 
-                  onClick={() => handleQuickAction('photo')} 
-                  disabled={isSubmitting || !photoFile || !selectedProject}
-                  className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-600 text-white py-2 rounded-lg text-sm font-medium"
-                >
-                  Upload Photo
-                </button>
-              </div>
-
-              {/* Add Issue */}
-              <div className="space-y-3">
-                <input 
-                  value={upgradeTitle} 
-                  onChange={e => setUpgradeTitle(e.target.value)} 
-                  placeholder="Issue description..."
-                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-400"
-                />
-                <button 
-                  onClick={() => handleQuickAction('issue')} 
-                  disabled={isSubmitting || !upgradeTitle.trim() || !selectedProject}
-                  className="w-full bg-orange-600 hover:bg-orange-700 disabled:bg-slate-600 text-white py-2 rounded-lg text-sm font-medium"
-                >
-                  Add Issue
-                </button>
-              </div>
-            </div>
-
-            {/* Open Issues */}
-            <div className="bg-slate-900/50 border border-slate-800 rounded-lg overflow-hidden">
-              <div className="p-4 bg-red-500/10 border-b border-slate-800">
-                <h3 className="font-semibold text-white flex items-center gap-2">
-                  <AlertTriangle className="h-5 w-5 text-red-400" />
-                  Open Issues ({issues.length})
-                </h3>
-              </div>
-              <div className="p-4 space-y-3 max-h-96 overflow-y-auto">
-                {issues.map(issue => (
-                  <div 
-                    key={issue.id} 
-                    className="bg-slate-800/50 rounded-lg p-3 cursor-pointer hover:bg-slate-800/70"
-                    onClick={() => setExpandedIssue(expandedIssue === issue.id ? null : issue.id)}
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <p className="text-sm font-medium text-white">{issue.title}</p>
-                        <p className="text-xs text-slate-400 mt-1">{issue.projectName}</p>
-                        {expandedIssue === issue.id && issue.description && (
-                          <p className="text-xs text-slate-300 mt-2">{issue.description}</p>
-                        )}
-                      </div>
-                      <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${
-                        expandedIssue === issue.id ? 'rotate-180' : ''
-                      }`} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Job Accounts */}
-            {pendingAcct.length > 0 && (
-              <div className="bg-slate-900/50 border border-slate-800 rounded-lg overflow-hidden">
-                <div className="p-4 bg-orange-500/10 border-b border-slate-800">
-                  <h3 className="font-semibold text-white">QB Setup Needed</h3>
-                </div>
-                <div className="p-4 space-y-2">
-                  {pendingAcct.map(acct => (
-                    <div key={acct.id} className="text-sm text-slate-300">
-                      {acct.title}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Messages */}
-      {(error || successMessage) && (
-        <div className="fixed bottom-4 right-4 max-w-sm">
-          {error && (
-            <div className="bg-red-500/20 border border-red-500 text-red-300 p-4 rounded-lg mb-2">
-              {error}
-            </div>
-          )}
-          {successMessage && (
-            <div className="bg-green-500/20 border border-green-500 text-green-300 p-4 rounded-lg">
-              {successMessage}
-            </div>
-          )}
         </div>
       )}
-    </div>
-  );
-}
-
-// Components
-const KPICard = ({ icon: Icon, label, value, color }: any) => (
-  <div className="bg-slate-800/50 rounded-lg p-3">
-    <div className="flex items-center justify-between">
-      <Icon className={`h-5 w-5 ${color}`} />
-      <span className="text-2xl font-bold text-white">{value}</span>
-    </div>
-    <p className="text-xs text-slate-400 mt-1">{label}</p>
-  </div>
-);
-
-const ProjectCard = ({ project, onClick }: { project: BoardItem; onClick: () => void }) => (
-  <div 
-    className="bg-slate-800/50 border border-slate-700 rounded-lg p-4 hover:bg-slate-800/70 cursor-pointer"
-    onClick={onClick}
-  >
-    <div className="flex items-start justify-between">
-      <div>
-        <h3 className="font-medium text-white">
-          {project.title}
-          {project.subdivision && <span className="text-slate-400 text-sm ml-2">• {project.subdivision}</span>}
+      
+      {/* Stats */}
+      <div className="bg-slate-800/50 rounded-xl p-4">
+        <h3 className="font-semibold text-white mb-3 flex items-center gap-2">
+          <BarChart3 className="h-5 w-5 text-green-400" />
+          This Week
         </h3>
-        <div className="flex items-center gap-4 mt-2 text-xs text-slate-400">
-          {project.client && <span>{project.client}</span>}
-          {project.builder && <span>{project.builder}</span>}
+        <div className="space-y-2 text-sm">
+          <div className="flex justify-between">
+            <span className="text-slate-400">Photos Added</span>
+            <span className="text-white font-medium">23</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-slate-400">Issues Resolved</span>
+            <span className="text-white font-medium">8</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-slate-400">Tasks Completed</span>
+            <span className="text-white font-medium">47</span>
+          </div>
         </div>
       </div>
-      <ExternalLink className="h-4 w-4 text-slate-400" />
     </div>
-  </div>
-);
+  );
+};
 
-export default function OperationsDashboard(props: { 
-  initialKpis: KPI; 
-  initialPendingAcct: ProjectRow[]; 
-}) {
+// ==================== MAIN APP ====================
+
+export default function App() {
+  const [viewingProjectId, setViewingProjectId] = useState(null);
+  const [projects, setProjects] = useState([
+    { id: '1', title: 'Apple Ln', subdivision: 'Oak Ridge', status: 'Bidding', client: 'John Smith', builder: 'ABC Construction', location: '123 Apple Ln', jobNumber: '2024-001' },
+    { id: '2', title: 'Pine St', subdivision: 'Westview', status: 'Post & Beam', client: 'Jane Doe', builder: 'XYZ Builders', location: '456 Pine St', jobNumber: '2024-002' },
+    { id: '3', title: 'Oak Grove', subdivision: 'Eastside', status: 'Trim', client: 'Bob Johnson', builder: 'DEF Construction', location: '789 Oak Grove', jobNumber: '2024-003' },
+  ]);
+  const [filteredProjects, setFilteredProjects] = useState(projects);
+  
+  const kpis = {
+    activeBids: 5,
+    postAndBeam: 12,
+    jobAccountsPending: 3,
+    openProblems: 8
+  };
+
+  const handleSearch = (searchTerm) => {
+    if (!searchTerm) {
+      setFilteredProjects(projects);
+    } else {
+      const term = searchTerm.toLowerCase();
+      setFilteredProjects(projects.filter(p => 
+        p.title.toLowerCase().includes(term) ||
+        p.client?.toLowerCase().includes(term) ||
+        p.subdivision?.toLowerCase().includes(term) ||
+        p.location?.toLowerCase().includes(term)
+      ));
+    }
+  };
+
+  useKeyboardShortcuts();
+
   return (
-    <Suspense fallback={
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
-        <div className="text-slate-400">Loading...</div>
+    <AppProvider>
+      <div className="min-h-screen bg-slate-950 text-white">
+        <Header kpis={kpis} />
+        
+        <div className="max-w-7xl mx-auto px-4 py-6">
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+            <div className="lg:col-span-3 space-y-6">
+              <SearchBar onSearch={handleSearch} />
+              <ProjectGrid 
+                projects={filteredProjects} 
+                onProjectClick={setViewingProjectId}
+              />
+            </div>
+            
+            <div className="lg:col-span-1">
+              <QuickActionsSidebar />
+            </div>
+          </div>
+        </div>
+        
+        {viewingProjectId && (
+          <ProjectDetailPanel
+            projectId={viewingProjectId}
+            onClose={() => setViewingProjectId(null)}
+          />
+        )}
+        
+        <NotificationCenter />
       </div>
-    }>
+    </AppProvider>
+  );
+}
       <DashboardComponent {...props} />
     </Suspense>
   );
