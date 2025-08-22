@@ -160,7 +160,7 @@ export const listBids = async (): Promise<Array<{
       const props = r.properties || {};
       return {
         id: r.id,
-        title: readTitle(props, 'Project'),
+        title: readTitle(props, 'Heading'),
         client: readTextish(props, 'Client'),
         builder: readTextish(props, 'Builder'),
         location: readTextish(props, 'Location'),
@@ -223,7 +223,7 @@ export async function listJobAccountPending(): Promise<Array<{
       const props = r.properties || {};
       return {
         id: r.id,
-        title: readTitle(props, 'Project'),
+        title: readTitle(props, 'Heading'),
         client: readTextish(props, 'Client'),
         description: 'QuickBooks job account needs to be created' // Clarify what this is
       };
@@ -744,12 +744,12 @@ export async function listProjectOptions(): Promise<Array<{ id: string; title: s
     const results = await queryAll({ 
       database_id: PROJECTS_DB_ID, 
       page_size: 100,
-      sorts: [{ property: 'Project', direction: 'ascending' }]
+      sorts: [{ property: 'Heading', direction: 'ascending' }]
     });
     
     const options = results.map((r: any) => ({ 
       id: r.id, 
-      title: readTitle(r.properties, 'Project'),
+      title: readTitle(r.properties, 'Heading'),
       subdivision: readTextish(r.properties, 'Sub-Division') || readTextish(r.properties, 'Subdivision')
     }));
     
@@ -839,7 +839,7 @@ export async function listProjectsBoard(input: { q?: string; status?: string }):
       const props = r.properties || {};
       return {
         id: r.id,
-        title: readTitle(props, 'Project'),
+        title: readTitle(props, 'Heading'),
         status: readTextish(props, 'Status'),
         client: readTextish(props, 'Client'),
         builder: readTextish(props, 'Builder'),
@@ -947,21 +947,36 @@ export async function getProjectFull(id: string): Promise<any> {
 
     const project = {
       id,
-      title: readTitle(props, 'Project'),
+      title: readTitle(props, 'Heading'),
       client: readTextish(props, 'Client'),
-      builder: readTextish(props, 'Builder'), // Include builder
+      builder: readTextish(props, 'Builder'),
       location: readTextish(props, 'Location'),
       status: readTextish(props, 'Status'),
       budget: readTextish(props, 'Budget'),
       spent: readTextish(props, 'Spent'),
       budgetSpent: readTextish(props, 'Budget spent'),
-      totalHours: readTextish(props, 'Total hours'),
-      totalExpenses: readTextish(props, 'Total expenses'),
-      deadline: readTextish(props, 'Deadline'),
-      projectManager: readTextish(props, 'Project manager'),
-      team: readTextish(props, 'Team'),
-      subDivision: readTextish(props, 'Sub-Division'),
+      contract: readTextish(props, 'Contract'),
       constructionPhase: readTextish(props, 'Construction Phase'),
+      documentation: readTextish(props, 'Documentation'),
+      expenses: readTextish(props, 'Expenses'),
+      filesMedia: readTextish(props, 'Files & media'),
+      hourlyRate: readTextish(props, 'Hourly rate'),
+      improvements: readTextish(props, 'Improvements'),
+      jobAccountSetup: readTextish(props, 'Job Account Setup'),
+      lastUpdated: readTextish(props, 'Last Updated'),
+      lastEditedTime: readTextish(props, 'Last edited time'),
+      needFollowUp: readTextish(props, 'Need follow up'),
+      notes: readTextish(props, 'Notes'),
+      options: readTextish(props, 'Options'),
+      projectManager: readTextish(props, 'Project manager'),
+      subDivision: readTextish(props, 'Sub-Division'),
+      tasks: readTextish(props, 'Tasks'),
+      timeTracking: readTextish(props, 'Time tracking'),
+      totalExpenses: readTextish(props, 'Total expenses'),
+      totalHours: readTextish(props, 'Total hours'),
+      // Legacy properties for backward compatibility
+      deadline: readTextish(props, 'Deadline'),
+      team: readTextish(props, 'Team'),
       biddingStatus: readTextish(props, 'BiddingStatus')
     };
 
@@ -993,12 +1008,15 @@ export async function getProjectFull(id: string): Promise<any> {
       const taskProps = task.properties || {};
       return {
         id: task.id,
-        title: readTitle(taskProps, 'Task'),
+        title: readTitle(taskProps, 'Heading'),
         status: readTextish(taskProps, 'Status'),
-        assignee: readTextish(taskProps, 'Asignee'),
-        due: readTextish(taskProps, 'Due Date'),
+        assignee: readTextish(taskProps, 'Assignee'),
+        dueDate: readTextish(taskProps, 'Due Date'),
         category: readTextish(taskProps, 'Category'),
-        comment: readTextish(taskProps, 'Comment')
+        comment: readTextish(taskProps, 'Comment'),
+        notes: readTextish(taskProps, 'Notes'),
+        // Legacy field for backward compatibility
+        due: readTextish(taskProps, 'Due Date')
       };
     });
 
@@ -1080,5 +1098,49 @@ export async function createPhotoEntry(input: {
   } catch (e) {
     console.error('Error creating photo entry:', e);
     throw new Error(`Failed to create photo entry: ${e instanceof Error ? e.message : 'Unknown error'}`);
+  }
+}
+
+// Get photos for a specific project
+export async function getProjectPhotos(projectId: string): Promise<Array<{
+  id: string;
+  url: string;
+  description?: string;
+  date: string;
+  category?: string;
+  photographer?: string;
+  metadata?: {
+    width?: number;
+    height?: number;
+    fileSize?: string;
+  };
+}>> {
+  try {
+    const photoResults = await queryAll({
+      database_id: PHOTOS_DB_ID,
+      filter: { property: 'Projects', relation: { contains: projectId } },
+      sorts: [{ property: 'Date', direction: 'descending' }]
+    });
+
+    return photoResults.map((photo: any) => {
+      const photoProps = photo.properties || {};
+      const files = photoProps['Photo']?.files || [];
+      const url = files[0]?.file?.url || files[0]?.external?.url || '';
+      
+      return {
+        id: photo.id,
+        url,
+        description: readTitle(photoProps, 'Name') || 'Photo',
+        date: readTextish(photoProps, 'Date') || new Date().toISOString().split('T')[0],
+        category: readTextish(photoProps, 'Category'),
+        photographer: readTextish(photoProps, 'Photographer'),
+        metadata: {
+          fileSize: readTextish(photoProps, 'File Size')
+        }
+      };
+    }).filter((photo) => photo.url); // Filter out photos without URLs
+  } catch (e) {
+    console.error('Error getting project photos:', e);
+    throw new Error(`Failed to fetch project photos: ${e instanceof Error ? e.message : 'Unknown error'}`);
   }
 }
