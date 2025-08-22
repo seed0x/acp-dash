@@ -131,7 +131,7 @@ export const listBids = async (): Promise<Array<{
       const props = r.properties || {};
       return {
         id: r.id,
-        title: readTitle(props, 'Heading'),
+        title: readTitle(props, 'Project'),
         client: readTextish(props, 'Client'),
         builder: readTextish(props, 'Builder'),
         location: readTextish(props, 'Location'),
@@ -168,7 +168,7 @@ export async function listJobAccountPending(): Promise<Array<{
       const props = r.properties || {};
       return {
         id: r.id,
-        title: readTitle(props, 'Heading'),
+        title: readTitle(props, 'Project'),
         client: readTextish(props, 'Client'),
         description: 'QuickBooks job account needs to be created' // Clarify what this is
       };
@@ -601,7 +601,7 @@ export async function listProjectOptions(): Promise<Array<{ id: string; title: s
     
     const options = results.map((r: any) => ({ 
       id: r.id, 
-      title: readTitle(r.properties, 'Heading'),
+      title: readTitle(r.properties, 'Project'),
       subdivision: readTextish(r.properties, 'Sub-Division') || readTextish(r.properties, 'Subdivision')
     }));
     
@@ -645,7 +645,7 @@ export async function listProjectsBoard(input: { q?: string; status?: string }):
       const props = r.properties || {};
       return {
         id: r.id,
-        title: readTitle(props, 'Heading'),
+        title: readTitle(props, 'Project'),
         status: readTextish(props, 'Status'),
         client: readTextish(props, 'Client'),
         builder: readTextish(props, 'Builder'),
@@ -718,7 +718,7 @@ export async function getProjectFull(id: string): Promise<any> {
 
     const project = {
       id,
-      title: readTitle(props, 'Heading'),
+      title: readTitle(props, 'Project'),
       client: readTextish(props, 'Client'),
       builder: readTextish(props, 'Builder'),
       location: readTextish(props, 'Location'),
@@ -779,7 +779,7 @@ export async function getProjectFull(id: string): Promise<any> {
       const taskProps = task.properties || {};
       return {
         id: task.id,
-        title: readTitle(taskProps, 'Heading'),
+        title: readTitle(taskProps, 'Improvement'),
         status: readTextish(taskProps, 'Status'),
         assignee: readTextish(taskProps, 'Assignee'),
         dueDate: readTextish(taskProps, 'Due Date'),
@@ -1006,7 +1006,7 @@ export async function searchPhotos(params: {
           const projectPage = await notion.pages.retrieve({ page_id: projectId });
           if ('properties' in projectPage) {
             const projectProps = projectPage.properties;
-            projectName = readTitle(projectProps, 'Heading') || '';
+            projectName = readTitle(projectProps, 'Project') || '';
             projectLocation = readTextish(projectProps, 'Location') || '';
           }
         } catch (e) {
