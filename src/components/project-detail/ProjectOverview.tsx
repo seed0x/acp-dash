@@ -1,0 +1,159 @@
+'use client'
+
+import React from 'react';
+import { User, Building, MapPin, Calendar, DollarSign, Clock } from 'lucide-react';
+import { Project } from '../../types';
+
+interface ProjectOverviewProps {
+  project: Project;
+}
+
+interface InfoFieldProps {
+  label: string;
+  value?: string;
+  icon?: React.ReactNode;
+}
+
+const InfoField: React.FC<InfoFieldProps> = ({ label, value, icon }) => (
+  <div className="bg-slate-800/50 rounded-lg p-3">
+    <div className="flex items-center gap-2 mb-1">
+      {icon}
+      <p className="text-xs text-slate-400">{label}</p>
+    </div>
+    <p className="text-white font-medium">{value || '-'}</p>
+  </div>
+);
+
+export const ProjectOverview: React.FC<ProjectOverviewProps> = ({ project }) => {
+  const getTaskStats = () => {
+    if (!project.tasks) return { total: 0, completed: 0, pending: 0 };
+    const total = project.tasks.length;
+    const completed = project.tasks.filter(t => t.completed).length;
+    const pending = total - completed;
+    return { total, completed, pending };
+  };
+
+  const getIssueStats = () => {
+    if (!project.issues) return { total: 0, open: 0, high: 0 };
+    const total = project.issues.length;
+    const open = project.issues.filter(i => i.status !== 'Closed').length;
+    const high = project.issues.filter(i => i.priority === 'High').length;
+    return { total, open, high };
+  };
+
+  const taskStats = getTaskStats();
+  const issueStats = getIssueStats();
+
+  return (
+    <div className="space-y-6">
+      {/* Basic Information */}
+      <div className="grid grid-cols-2 gap-4">
+        <InfoField 
+          label="Client" 
+          value={project.client} 
+          icon={<User className="h-4 w-4 text-slate-400" />}
+        />
+        <InfoField 
+          label="Builder" 
+          value={project.builder} 
+          icon={<Building className="h-4 w-4 text-slate-400" />}
+        />
+        <InfoField 
+          label="Location" 
+          value={project.location} 
+          icon={<MapPin className="h-4 w-4 text-slate-400" />}
+        />
+        <InfoField 
+          label="Job Number" 
+          value={project.jobNumber} 
+          icon={<Calendar className="h-4 w-4 text-slate-400" />}
+        />
+        {project.budget && (
+          <InfoField 
+            label="Budget" 
+            value={project.budget} 
+            icon={<DollarSign className="h-4 w-4 text-slate-400" />}
+          />
+        )}
+        {project.deadline && (
+          <InfoField 
+            label="Deadline" 
+            value={project.deadline} 
+            icon={<Clock className="h-4 w-4 text-slate-400" />}
+          />
+        )}
+      </div>
+
+      {/* Project Status */}
+      {project.status && (
+        <div className="bg-slate-800/50 rounded-xl p-4">
+          <h3 className="font-semibold text-white mb-3">Current Status</h3>
+          <div className="flex items-center gap-2">
+            <span className={`
+              px-3 py-1 rounded-full text-sm font-medium
+              ${project.status.toLowerCase().includes('complete') 
+                ? 'bg-green-500/20 text-green-300 border border-green-500/30'
+                : project.status.toLowerCase().includes('progress') || project.status.toLowerCase().includes('beam')
+                ? 'bg-orange-500/20 text-orange-300 border border-orange-500/30'
+                : 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+              }
+            `}>
+              {project.status}
+            </span>
+          </div>
+        </div>
+      )}
+      
+      {/* Quick Stats */}
+      <div className="bg-slate-800/50 rounded-xl p-6">
+        <h3 className="font-semibold text-white mb-4">Project Statistics</h3>
+        <div className="grid grid-cols-3 gap-4 text-center">
+          <div>
+            <p className="text-2xl font-bold text-blue-400">{taskStats.pending}</p>
+            <p className="text-xs text-slate-400">Open Tasks</p>
+          </div>
+          <div>
+            <p className="text-2xl font-bold text-orange-400">{issueStats.open}</p>
+            <p className="text-xs text-slate-400">Open Issues</p>
+          </div>
+          <div>
+            <p className="text-2xl font-bold text-green-400">{taskStats.completed}</p>
+            <p className="text-xs text-slate-400">Completed Tasks</p>
+          </div>
+        </div>
+        
+        {taskStats.total > 0 && (
+          <div className="mt-4">
+            <div className="flex justify-between text-sm text-slate-400 mb-1">
+              <span>Progress</span>
+              <span>{Math.round((taskStats.completed / taskStats.total) * 100)}%</span>
+            </div>
+            <div className="w-full bg-slate-700 rounded-full h-2">
+              <div 
+                className="bg-blue-500 h-2 rounded-full transition-all duration-300"
+                style={{ width: `${(taskStats.completed / taskStats.total) * 100}%` }}
+              />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Recent Activity */}
+      {project.comments && project.comments.length > 0 && (
+        <div className="bg-slate-800/50 rounded-xl p-4">
+          <h3 className="font-semibold text-white mb-3">Recent Activity</h3>
+          <div className="space-y-3">
+            {project.comments.slice(0, 3).map(comment => (
+              <div key={comment.id} className="bg-slate-700/50 rounded-lg p-3">
+                <p className="text-white text-sm">{comment.text}</p>
+                <p className="text-xs text-slate-400 mt-1">
+                  {comment.author} • {comment.createdAt}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};

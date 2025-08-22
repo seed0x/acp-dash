@@ -1,5 +1,5 @@
 // src/app/page.tsx
-import OperationsDashboard from '@/components/OperationsDashboard'
+import OperationsDashboard from '@/components/OperationsDashboardNew'
 import {
   countPostAndBeam,
   listBids,
@@ -17,8 +17,6 @@ export default async function Page() {
     jobAccountsPending: 0,
     openProblems: 0,
   };
-  
-  let initialPendingAcct: any[] = [];
 
   try {
     const [postBeamCount, bids, pendingAcct, improvements] = await Promise.all([
@@ -34,18 +32,15 @@ export default async function Page() {
       jobAccountsPending: pendingAcct.length,
       openProblems: improvements.length,
     };
-
-    initialPendingAcct = pendingAcct;
   } catch (err) {
     console.error("Failed to fetch initial data:", err);
-    // KPIs and pending accounts will remain at default values
+    // KPIs will remain at default values
   }
 
   return (
     <div className="max-w-screen-xl mx-auto">
       <OperationsDashboard
         initialKpis={initialKpis}
-        initialPendingAcct={initialPendingAcct}
       />
     </div>
   )
