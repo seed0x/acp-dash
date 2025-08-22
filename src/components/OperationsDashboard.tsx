@@ -1215,7 +1215,3 @@ export default function App() {
     </AppProvider>
   );
 }
-      <DashboardComponent {...props} />
-    </Suspense>
-  );
-}
