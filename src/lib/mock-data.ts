@@ -256,8 +256,8 @@ export const mockComments = [
 
 // Helper function to determine if we should use mock data
 export const shouldUseMockData = (): boolean => {
-  // Use mock data if in development or if NOTION_TOKEN is not set
-  return process.env.NODE_ENV === 'development' || !process.env.NOTION_TOKEN;
+  // Use mock data only if NOTION_TOKEN is not set
+  return !process.env.NOTION_TOKEN;
 };
 
 // Check if running in a restricted environment (like GitHub Actions)

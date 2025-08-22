@@ -125,9 +125,27 @@ export const listBids = async (): Promise<Array<{
   biddingStatus?: string; // New field for tracking bid progress
 }>> => {
   try {
-    // Check if we should use mock data or if Notion is unavailable
-    if (isRestrictedEnvironment() || shouldUseMockData() || !(await checkNotionConnection())) {
-      console.log('Using mock bids data due to Notion API unavailability');
+    // Use mock data only in restricted environments (CI/GitHub Actions)
+    if (isRestrictedEnvironment()) {
+      console.log('Using mock bids data due to restricted environment');
+      
+      // Filter mock projects for bidding statuses
+      const biddingStatuses = ['Bidding', 'Proposal', 'Quote Sent', 'Pending', 'New Lead', 'Planning'];
+      return mockProjects
+        .filter(project => biddingStatuses.includes(project.status))
+        .map(project => ({
+          id: project.id,
+          title: project.title,
+          client: project.client,
+          builder: project.builder,
+          location: project.location,
+          biddingStatus: project.status === 'Planning' ? 'Quote Sent' : 'new'
+        }));
+    }
+
+    // Use mock data if no token is available
+    if (shouldUseMockData()) {
+      console.log('Using mock bids data due to missing NOTION_TOKEN');
       
       // Filter mock projects for bidding statuses
       const biddingStatuses = ['Bidding', 'Proposal', 'Quote Sent', 'Pending', 'New Lead', 'Planning'];
@@ -196,9 +214,22 @@ export async function listJobAccountPending(): Promise<Array<{
   description?: string; // What needs to be setup
 }>> {
   try {
-    // Check if we should use mock data or if Notion is unavailable
-    if (isRestrictedEnvironment() || shouldUseMockData() || !(await checkNotionConnection())) {
-      console.log('Using mock job account pending data due to Notion API unavailability');
+    // Use mock data only in restricted environments (CI/GitHub Actions)
+    if (isRestrictedEnvironment()) {
+      console.log('Using mock job account pending data due to restricted environment');
+      
+      // Return one mock project as needing setup
+      return [{
+        id: mockProjects[1].id, // Kitchen project
+        title: mockProjects[1].title,
+        client: mockProjects[1].client,
+        description: 'QuickBooks job account needs to be created'
+      }];
+    }
+
+    // Use mock data if no token is available
+    if (shouldUseMockData()) {
+      console.log('Using mock job account pending data due to missing NOTION_TOKEN');
       
       // Return one mock project as needing setup
       return [{
@@ -255,9 +286,18 @@ export async function listImprovements(openOnly?: boolean): Promise<Array<{
   assignee?: string;
 }>> {
   try {
-    // Check if we should use mock data or if Notion is unavailable
-    if (isRestrictedEnvironment() || shouldUseMockData() || !(await checkNotionConnection())) {
-      console.log('Using mock improvements data due to Notion API unavailability');
+    // Use mock data only in restricted environments (CI/GitHub Actions)
+    if (isRestrictedEnvironment()) {
+      console.log('Using mock improvements data due to restricted environment');
+      const filtered = openOnly 
+        ? mockImprovements.filter(imp => imp.status !== 'Done' && imp.status !== 'Complete')
+        : mockImprovements;
+      return filtered;
+    }
+
+    // Use mock data if no token is available
+    if (shouldUseMockData()) {
+      console.log('Using mock improvements data due to missing NOTION_TOKEN');
       const filtered = openOnly 
         ? mockImprovements.filter(imp => imp.status !== 'Done' && imp.status !== 'Complete')
         : mockImprovements;
@@ -334,9 +374,51 @@ export async function listTasks(filters?: {
   completed?: boolean;
 }>> {
   try {
-    // Check if we should use mock data or if Notion is unavailable
-    if (isRestrictedEnvironment() || shouldUseMockData() || !(await checkNotionConnection())) {
-      console.log('Using mock tasks data due to Notion API unavailability');
+    // Use mock data only in restricted environments (CI/GitHub Actions)
+    if (isRestrictedEnvironment()) {
+      console.log('Using mock tasks data due to restricted environment');
+      
+      let tasks = [...mockTasks];
+
+      // Apply filters for mock data
+      if (filters?.openOnly) {
+        tasks = tasks.filter(task => task.status !== 'Done' && task.status !== 'Complete');
+      }
+
+      if (filters?.status && filters.status.length > 0) {
+        tasks = tasks.filter(task => filters.status!.includes(task.status));
+      }
+
+      if (filters?.priority && filters.priority.length > 0) {
+        tasks = tasks.filter(task => task.priority && filters.priority!.includes(task.priority));
+      }
+
+      if (filters?.assignee) {
+        tasks = tasks.filter(task => 
+          task.assignee?.toLowerCase().includes(filters.assignee!.toLowerCase())
+        );
+      }
+
+      if (filters?.projectId) {
+        tasks = tasks.filter(task => task.projectId === filters.projectId);
+      }
+
+      if (filters?.search && filters.search.trim()) {
+        const searchTerm = filters.search.toLowerCase().trim();
+        tasks = tasks.filter(task => 
+          task.title.toLowerCase().includes(searchTerm) ||
+          task.description?.toLowerCase().includes(searchTerm) ||
+          task.projectName?.toLowerCase().includes(searchTerm) ||
+          task.assignee?.toLowerCase().includes(searchTerm)
+        );
+      }
+
+      return tasks;
+    }
+
+    // Use mock data if no token is available
+    if (shouldUseMockData()) {
+      console.log('Using mock tasks data due to missing NOTION_TOKEN');
       
       let tasks = [...mockTasks];
 
@@ -730,9 +812,20 @@ export async function toggleJobAccount(id: string, value: boolean) {
 // List all projects for dropdowns with subdivision
 export async function listProjectOptions(): Promise<Array<{ id: string; title: string; subdivision?: string }>> {
   try {
-    // Check if we should use mock data or if Notion is unavailable
-    if (isRestrictedEnvironment() || shouldUseMockData() || !(await checkNotionConnection())) {
-      console.log('Using mock project options data due to Notion API unavailability');
+    // Use mock data only in restricted environments (CI/GitHub Actions)
+    if (isRestrictedEnvironment()) {
+      console.log('Using mock project options data due to restricted environment');
+      
+      return mockProjects.map(project => ({
+        id: project.id,
+        title: project.title,
+        subdivision: undefined // Mock data doesn't have subdivision
+      }));
+    }
+
+    // Use mock data if no token is available
+    if (shouldUseMockData()) {
+      console.log('Using mock project options data due to missing NOTION_TOKEN');
       
       return mockProjects.map(project => ({
         id: project.id,
@@ -784,9 +877,49 @@ export async function listProjectsBoard(input: { q?: string; status?: string }):
   statusOptions: string[]
 }> {
   try {
-    // Check if we should use mock data or if Notion is unavailable
-    if (isRestrictedEnvironment() || shouldUseMockData() || !(await checkNotionConnection())) {
-      console.log('Using mock projects data due to Notion API unavailability');
+    // Use mock data only in restricted environments (CI/GitHub Actions)
+    if (isRestrictedEnvironment()) {
+      console.log('Using mock projects data due to restricted environment');
+      
+      // Use mock data
+      let items = mockProjects.map(project => ({
+        id: project.id,
+        title: project.title,
+        status: project.status,
+        client: project.client,
+        builder: project.builder,
+        location: project.location,
+        subdivision: undefined, // Mock data doesn't have subdivision
+        deadline: project.deadline,
+        budget: project.budget,
+        budgetSpent: parseInt(project.budgetSpent.replace('%', '')) || 0,
+        biddingStatus: project.status === 'Planning' ? 'Quote Sent' : undefined
+      }));
+
+      // Apply filters for mock data
+      if (input.status && input.status !== 'All') {
+        items = items.filter(item => item.status === input.status);
+      }
+
+      if (input.q) {
+        const query = input.q.toLowerCase();
+        items = items.filter(item =>
+          [item.title, item.client, item.builder, item.location].some(v => 
+            (v || '').toLowerCase().includes(query)
+          )
+        );
+      }
+
+      const statusOptions = Array.from(new Set(
+        mockProjects.map(p => p.status).filter(Boolean)
+      ));
+
+      return { items, statusOptions };
+    }
+
+    // Use mock data if no token is available
+    if (shouldUseMockData()) {
+      console.log('Using mock projects data due to missing NOTION_TOKEN');
       
       // Use mock data
       let items = mockProjects.map(project => ({
