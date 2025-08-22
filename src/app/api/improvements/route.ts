@@ -10,9 +10,30 @@ export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url)
     const openOnly = searchParams.get('openOnly') === 'true'
-    // This will now include projectId in the returned data
-    const rows = await listImprovements(openOnly)
-    return NextResponse.json({ rows })
+    const enhanced = searchParams.get('enhanced') === 'true'
+    const search = searchParams.get('search') || undefined
+    const status = searchParams.get('status')?.split(',').filter(Boolean) || undefined
+    const priority = searchParams.get('priority')?.split(',').filter(Boolean) || undefined
+    const assignee = searchParams.get('assignee') || undefined
+    const projectId = searchParams.get('projectId') || undefined
+    
+    if (enhanced) {
+      // Use the listTasks function for enhanced data
+      const { listTasks } = await import('@/lib/notion-dashboard')
+      const rows = await listTasks({
+        openOnly,
+        search,
+        status,
+        priority,
+        assignee,
+        projectId
+      })
+      return NextResponse.json({ rows })
+    } else {
+      // Use the original listImprovements function
+      const rows = await listImprovements(openOnly)
+      return NextResponse.json({ rows })
+    }
   } catch (e: any) {
     console.error('Improvements GET API error:', e);
     return NextResponse.json({ 
