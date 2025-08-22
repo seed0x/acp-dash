@@ -915,3 +915,153 @@ export async function getProjectPhotos(projectId: string): Promise<Array<{
     throw new Error(`Failed to fetch project photos: ${e instanceof Error ? e.message : 'Unknown error'}`);
   }
 }
+
+// Enhanced photo search function with comprehensive filtering
+export async function searchPhotos(params: {
+  projectId?: string;
+  search?: string; // Search in description, project name, photographer
+  category?: string;
+  photographer?: string;
+  dateFrom?: string; // ISO date string
+  dateTo?: string; // ISO date string
+  projectName?: string;
+  location?: string;
+}): Promise<Array<{
+  id: string;
+  url: string;
+  description?: string;
+  date: string;
+  category?: string;
+  photographer?: string;
+  projectId?: string;
+  projectName?: string;
+  projectLocation?: string;
+  metadata?: {
+    width?: number;
+    height?: number;
+    fileSize?: string;
+  };
+}>> {
+  try {
+    const filters: any[] = [];
+
+    // Filter by project if specified
+    if (params.projectId) {
+      filters.push({
+        property: 'Projects',
+        relation: { contains: params.projectId }
+      });
+    }
+
+    // Filter by category if specified
+    if (params.category) {
+      filters.push({
+        property: 'Category',
+        select: { equals: params.category }
+      });
+    }
+
+    // Filter by photographer if specified
+    if (params.photographer) {
+      filters.push({
+        property: 'Photographer',
+        rich_text: { contains: params.photographer }
+      });
+    }
+
+    // Filter by date range
+    if (params.dateFrom || params.dateTo) {
+      const dateFilter: any = { property: 'Date', date: {} };
+      if (params.dateFrom) {
+        dateFilter.date.on_or_after = params.dateFrom;
+      }
+      if (params.dateTo) {
+        dateFilter.date.on_or_before = params.dateTo;
+      }
+      filters.push(dateFilter);
+    }
+
+    const photoResults = await queryAll({
+      database_id: PHOTOS_DB_ID,
+      ...(filters.length > 0 && { filter: { and: filters } }),
+      sorts: [{ property: 'Date', direction: 'descending' }]
+    });
+
+    // Map photos and get project information
+    let photos = await Promise.all(photoResults.map(async (photo: any) => {
+      const photoProps = photo.properties || {};
+      const files = photoProps['Photo']?.files || [];
+      const url = files[0]?.file?.url || files[0]?.external?.url || '';
+      
+      // Get project information
+      const projectRelations = readRelation(photoProps, 'Projects');
+      let projectName = '';
+      let projectLocation = '';
+      let projectId = '';
+      
+      if (projectRelations.length > 0) {
+        projectId = projectRelations[0].id;
+        try {
+          // Get project details for name and location
+          const projectPage = await notion.pages.retrieve({ page_id: projectId });
+          if ('properties' in projectPage) {
+            const projectProps = projectPage.properties;
+            projectName = readTitle(projectProps, 'Heading') || '';
+            projectLocation = readTextish(projectProps, 'Location') || '';
+          }
+        } catch (e) {
+          console.warn('Failed to get project details for photo:', e);
+        }
+      }
+      
+      return {
+        id: photo.id,
+        url,
+        description: readTitle(photoProps, 'Name') || 'Photo',
+        date: readTextish(photoProps, 'Date') || new Date().toISOString().split('T')[0],
+        category: readTextish(photoProps, 'Category'),
+        photographer: readTextish(photoProps, 'Photographer'),
+        projectId,
+        projectName,
+        projectLocation,
+        metadata: {
+          fileSize: readTextish(photoProps, 'File Size')
+        }
+      };
+    }));
+
+    // Filter out photos without URLs
+    photos = photos.filter((photo) => photo.url);
+
+    // Apply text-based filters (search, project name, location)
+    if (params.search && params.search.trim()) {
+      const searchTerm = params.search.toLowerCase().trim();
+      photos = photos.filter(photo => 
+        photo.description?.toLowerCase().includes(searchTerm) ||
+        photo.projectName?.toLowerCase().includes(searchTerm) ||
+        photo.photographer?.toLowerCase().includes(searchTerm) ||
+        photo.category?.toLowerCase().includes(searchTerm) ||
+        photo.projectLocation?.toLowerCase().includes(searchTerm)
+      );
+    }
+
+    if (params.projectName && params.projectName.trim()) {
+      const projectNameTerm = params.projectName.toLowerCase().trim();
+      photos = photos.filter(photo => 
+        photo.projectName?.toLowerCase().includes(projectNameTerm)
+      );
+    }
+
+    if (params.location && params.location.trim()) {
+      const locationTerm = params.location.toLowerCase().trim();
+      photos = photos.filter(photo => 
+        photo.projectLocation?.toLowerCase().includes(locationTerm)
+      );
+    }
+
+    return photos;
+  } catch (e) {
+    console.error('Error searching photos:', e);
+    throw new Error(`Failed to search photos: ${e instanceof Error ? e.message : 'Unknown error'}`);
+  }
+}
