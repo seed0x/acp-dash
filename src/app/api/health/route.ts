@@ -18,7 +18,7 @@ export async function GET() {
       NODE_ENV: process.env.NODE_ENV,
       nodeVersion: process.versions.node,
       timestamp: new Date().toISOString(),
-      isCI: !!(process.env.GITHUB_ACTIONS || process.env.CI)
+      isCI: !!process.env.GITHUB_ACTIONS
     },
     notion: {
       available: false
@@ -27,8 +27,8 @@ export async function GET() {
     errors: [] as string[],
   }
 
-  // Check if we're in CI environment
-  if (process.env.GITHUB_ACTIONS || process.env.CI) {
+  // Check if we're in CI environment (GitHub Actions only)
+  if (process.env.GITHUB_ACTIONS) {
     report.errors.push('Running in CI environment - Notion connection skipped');
     return NextResponse.json(report, { status: 200 });
   }
