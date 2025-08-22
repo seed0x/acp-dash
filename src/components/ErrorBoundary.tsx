@@ -46,7 +46,7 @@ export class ErrorBoundary extends Component<Props, State> {
               <AlertTriangle className="h-16 w-16 text-red-400 mx-auto mb-4" />
               <h1 className="text-2xl font-bold text-white mb-2">Something went wrong</h1>
               <p className="text-slate-400">
-                We're sorry, but something unexpected happened. Please try refreshing the page.
+                We&apos;re sorry, but something unexpected happened. Please try refreshing the page.
               </p>
             </div>
             

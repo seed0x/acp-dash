@@ -382,7 +382,7 @@ const PhotosTab = ({ items }: { items: Photo[] }) => (
       <div className="text-center py-12">
         <Camera className="h-12 w-12 text-slate-400 mx-auto mb-4" />
         <p className="text-slate-400">No photos uploaded yet</p>
-        <p className="text-sm text-slate-500 mt-1">Photos will appear here as they're added to the project</p>
+        <p className="text-sm text-slate-500 mt-1">Photos will appear here as they&apos;re added to the project</p>
       </div>
     )}
   </div>
