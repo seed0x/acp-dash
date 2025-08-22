@@ -1,7 +1,7 @@
 // src/app/api/photos/route.ts
 import { NextResponse } from 'next/server';
 import { put } from '@vercel/blob';
-import { createPhotoEntry, getProjectPhotos } from '@/lib/notion-dashboard';
+import { createPhotoEntry, getProjectPhotos, searchPhotos } from '@/lib/notion-dashboard';
 
 export async function POST(req: Request) {
   try {
@@ -157,49 +157,42 @@ export async function POST(req: Request) {
   }
 }
 
-// GET endpoint to retrieve photos for a project
+// GET endpoint to retrieve and search photos
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const projectId = searchParams.get('projectId');
+    const search = searchParams.get('search');
+    const category = searchParams.get('category');
+    const photographer = searchParams.get('photographer');
+    const dateFrom = searchParams.get('dateFrom');
+    const dateTo = searchParams.get('dateTo');
+    const projectName = searchParams.get('projectName');
+    const location = searchParams.get('location');
     
-    if (!projectId) {
-      return NextResponse.json({ 
-        error: 'Project ID is required' 
-      }, { status: 400 });
-    }
-    
-    // Fetch photos from Notion
-    try {
+    // If only projectId is provided, use the simpler function
+    if (projectId && !search && !category && !photographer && !dateFrom && !dateTo && !projectName && !location) {
       const photos = await getProjectPhotos(projectId);
       return NextResponse.json({ photos });
-    } catch (notionError) {
-      console.error('Notion API error, falling back to mock data:', notionError);
-      
-      // Fallback to mock data
-      const photos = [
-        {
-          id: '1',
-          url: '/api/placeholder/400/300',
-          description: 'Foundation work',
-          date: '2024-01-15',
-          category: 'Construction'
-        },
-        {
-          id: '2',
-          url: '/api/placeholder/400/300',
-          description: 'Plumbing rough-in',
-          date: '2024-01-20',
-          category: 'Plumbing'
-        }
-      ];
-      
-      return NextResponse.json({ photos });
     }
+    
+    // Use the enhanced search function for all other cases
+    const photos = await searchPhotos({
+      projectId: projectId || undefined,
+      search: search || undefined,
+      category: category || undefined,
+      photographer: photographer || undefined,
+      dateFrom: dateFrom || undefined,
+      dateTo: dateTo || undefined,
+      projectName: projectName || undefined,
+      location: location || undefined
+    });
+    
+    return NextResponse.json({ photos });
   } catch (e: any) {
-    console.error('Photo fetch error:', e);
+    console.error('Photo fetch/search error:', e);
     return NextResponse.json({ 
-      error: 'Failed to fetch photos',
+      error: 'Failed to fetch photos: ' + (e.message || 'Unknown error'),
       photos: []
     }, { status: 500 });
   }

@@ -1,16 +1,5 @@
 // src/lib/notion-dashboard.ts
 import { Client } from '@notionhq/client'
-import { 
-  mockProjects, 
-  mockImprovements, 
-  mockTasks, 
-  mockPhotos, 
-  mockExpenses, 
-  mockClients, 
-  mockComments,
-  shouldUseMockData,
-  isRestrictedEnvironment
-} from './mock-data'
 
 export const notion = new Client({
   auth: process.env.NOTION_TOKEN || process.env.NOTION_API_KEY,
@@ -125,24 +114,6 @@ export const listBids = async (): Promise<Array<{
   biddingStatus?: string; // New field for tracking bid progress
 }>> => {
   try {
-    // Check if we should use mock data or if Notion is unavailable
-    if (isRestrictedEnvironment() || shouldUseMockData() || !(await checkNotionConnection())) {
-      console.log('Using mock bids data due to Notion API unavailability');
-      
-      // Filter mock projects for bidding statuses
-      const biddingStatuses = ['Bidding', 'Proposal', 'Quote Sent', 'Pending', 'New Lead', 'Planning'];
-      return mockProjects
-        .filter(project => biddingStatuses.includes(project.status))
-        .map(project => ({
-          id: project.id,
-          title: project.title,
-          client: project.client,
-          builder: project.builder,
-          location: project.location,
-          biddingStatus: project.status === 'Planning' ? 'Quote Sent' : 'new'
-        }));
-    }
-
     const results = await queryAll({
       database_id: PROJECTS_DB_ID,
       filter: {
@@ -171,20 +142,7 @@ export const listBids = async (): Promise<Array<{
     return bids;
   } catch (e) {
     console.error('Error listing bids:', e);
-    console.log('Falling back to mock bids data');
-    
-    // Fallback to mock data
-    const biddingStatuses = ['Bidding', 'Proposal', 'Quote Sent', 'Pending', 'New Lead', 'Planning'];
-    return mockProjects
-      .filter(project => biddingStatuses.includes(project.status))
-      .map(project => ({
-        id: project.id,
-        title: project.title,
-        client: project.client,
-        builder: project.builder,
-        location: project.location,
-        biddingStatus: project.status === 'Planning' ? 'Quote Sent' : 'new'
-      }));
+    throw new Error(`Failed to fetch bids: ${e instanceof Error ? e.message : 'Unknown error'}`);
   }
 };
 
@@ -196,19 +154,6 @@ export async function listJobAccountPending(): Promise<Array<{
   description?: string; // What needs to be setup
 }>> {
   try {
-    // Check if we should use mock data or if Notion is unavailable
-    if (isRestrictedEnvironment() || shouldUseMockData() || !(await checkNotionConnection())) {
-      console.log('Using mock job account pending data due to Notion API unavailability');
-      
-      // Return one mock project as needing setup
-      return [{
-        id: mockProjects[1].id, // Kitchen project
-        title: mockProjects[1].title,
-        client: mockProjects[1].client,
-        description: 'QuickBooks job account needs to be created'
-      }];
-    }
-
     const results = await queryAll({
       database_id: PROJECTS_DB_ID,
       filter: {
@@ -232,15 +177,7 @@ export async function listJobAccountPending(): Promise<Array<{
     return pending;
   } catch (e) {
     console.error('Error listing job account pending:', e);
-    console.log('Falling back to mock job account pending data');
-    
-    // Fallback to mock data
-    return [{
-      id: mockProjects[1].id,
-      title: mockProjects[1].title,
-      client: mockProjects[1].client,
-      description: 'QuickBooks job account needs to be created'
-    }];
+    throw new Error(`Failed to fetch job account pending items: ${e instanceof Error ? e.message : 'Unknown error'}`);
   }
 }
 
@@ -255,15 +192,6 @@ export async function listImprovements(openOnly?: boolean): Promise<Array<{
   assignee?: string;
 }>> {
   try {
-    // Check if we should use mock data or if Notion is unavailable
-    if (isRestrictedEnvironment() || shouldUseMockData() || !(await checkNotionConnection())) {
-      console.log('Using mock improvements data due to Notion API unavailability');
-      const filtered = openOnly 
-        ? mockImprovements.filter(imp => imp.status !== 'Done' && imp.status !== 'Complete')
-        : mockImprovements;
-      return filtered;
-    }
-
     const filters: any[] = [];
     if (openOnly) {
       filters.push({
@@ -303,11 +231,7 @@ export async function listImprovements(openOnly?: boolean): Promise<Array<{
     return improvements;
   } catch (e) {
     console.error('Error listing improvements:', e);
-    console.log('Falling back to mock improvements data');
-    const filtered = openOnly 
-      ? mockImprovements.filter(imp => imp.status !== 'Done' && imp.status !== 'Complete')
-      : mockImprovements;
-    return filtered;
+    throw new Error(`Failed to fetch improvements: ${e instanceof Error ? e.message : 'Unknown error'}`);
   }
 }
 
@@ -334,48 +258,6 @@ export async function listTasks(filters?: {
   completed?: boolean;
 }>> {
   try {
-    // Check if we should use mock data or if Notion is unavailable
-    if (isRestrictedEnvironment() || shouldUseMockData() || !(await checkNotionConnection())) {
-      console.log('Using mock tasks data due to Notion API unavailability');
-      
-      let tasks = [...mockTasks];
-
-      // Apply filters for mock data
-      if (filters?.openOnly) {
-        tasks = tasks.filter(task => task.status !== 'Done' && task.status !== 'Complete');
-      }
-
-      if (filters?.status && filters.status.length > 0) {
-        tasks = tasks.filter(task => filters.status!.includes(task.status));
-      }
-
-      if (filters?.priority && filters.priority.length > 0) {
-        tasks = tasks.filter(task => task.priority && filters.priority!.includes(task.priority));
-      }
-
-      if (filters?.assignee) {
-        tasks = tasks.filter(task => 
-          task.assignee?.toLowerCase().includes(filters.assignee!.toLowerCase())
-        );
-      }
-
-      if (filters?.projectId) {
-        tasks = tasks.filter(task => task.projectId === filters.projectId);
-      }
-
-      if (filters?.search && filters.search.trim()) {
-        const searchTerm = filters.search.toLowerCase().trim();
-        tasks = tasks.filter(task => 
-          task.title.toLowerCase().includes(searchTerm) ||
-          task.description?.toLowerCase().includes(searchTerm) ||
-          task.projectName?.toLowerCase().includes(searchTerm) ||
-          task.assignee?.toLowerCase().includes(searchTerm)
-        );
-      }
-
-      return tasks;
-    }
-
     const notionFilters: any[] = [];
     
     // Filter by open status if requested
@@ -473,27 +355,7 @@ export async function listTasks(filters?: {
     return tasks;
   } catch (e) {
     console.error('Error listing tasks:', e);
-    console.log('Falling back to mock tasks data');
-    
-    // Fallback to mock data on error
-    let tasks = [...mockTasks];
-
-    // Apply filters for mock data  
-    if (filters?.openOnly) {
-      tasks = tasks.filter(task => task.status !== 'Done' && task.status !== 'Complete');
-    }
-
-    if (filters?.search && filters.search.trim()) {
-      const searchTerm = filters.search.toLowerCase().trim();
-      tasks = tasks.filter(task => 
-        task.title.toLowerCase().includes(searchTerm) ||
-        task.description?.toLowerCase().includes(searchTerm) ||
-        task.projectName?.toLowerCase().includes(searchTerm) ||
-        task.assignee?.toLowerCase().includes(searchTerm)
-      );
-    }
-
-    return tasks;
+    throw new Error(`Failed to fetch tasks: ${e instanceof Error ? e.message : 'Unknown error'}`);
   }
 }
 
@@ -690,15 +552,16 @@ export async function getTaskComments(taskId: string): Promise<Array<{
   author: string;
   createdAt: string;
 }>> {
-  // This would query a comments database in Notion
-  // For now, return mock comments filtered by taskId
-  return mockComments.filter(comment => comment.taskId === taskId);
+  // This functionality would require a comments database in Notion
+  // For now, return empty array as comments are not implemented
+  console.log('Comments feature not yet implemented with Notion database');
+  return [];
 }
 
 export async function addTaskComment(taskId: string, content: string, author: string): Promise<string> {
-  // This would create a new comment in Notion
-  // For now, return a mock ID
-  return `comment_${Date.now()}`;
+  // This functionality would require a comments database in Notion
+  // For now, throw an error as comments are not implemented
+  throw new Error('Comments feature not yet implemented with Notion database');
 }
 
 // Update improvement status
@@ -730,17 +593,6 @@ export async function toggleJobAccount(id: string, value: boolean) {
 // List all projects for dropdowns with subdivision
 export async function listProjectOptions(): Promise<Array<{ id: string; title: string; subdivision?: string }>> {
   try {
-    // Check if we should use mock data or if Notion is unavailable
-    if (isRestrictedEnvironment() || shouldUseMockData() || !(await checkNotionConnection())) {
-      console.log('Using mock project options data due to Notion API unavailability');
-      
-      return mockProjects.map(project => ({
-        id: project.id,
-        title: project.title,
-        subdivision: undefined // Mock data doesn't have subdivision
-      }));
-    }
-
     const results = await queryAll({ 
       database_id: PROJECTS_DB_ID, 
       page_size: 100,
@@ -756,13 +608,7 @@ export async function listProjectOptions(): Promise<Array<{ id: string; title: s
     return options;
   } catch (e) {
     console.error('Error listing project options:', e);
-    console.log('Falling back to mock project options data');
-    
-    return mockProjects.map(project => ({
-      id: project.id,
-      title: project.title,
-      subdivision: undefined
-    }));
+    throw new Error(`Failed to fetch project options: ${e instanceof Error ? e.message : 'Unknown error'}`);
   }
 }
 
@@ -784,46 +630,6 @@ export async function listProjectsBoard(input: { q?: string; status?: string }):
   statusOptions: string[]
 }> {
   try {
-    // Check if we should use mock data or if Notion is unavailable
-    if (isRestrictedEnvironment() || shouldUseMockData() || !(await checkNotionConnection())) {
-      console.log('Using mock projects data due to Notion API unavailability');
-      
-      // Use mock data
-      let items = mockProjects.map(project => ({
-        id: project.id,
-        title: project.title,
-        status: project.status,
-        client: project.client,
-        builder: project.builder,
-        location: project.location,
-        subdivision: undefined, // Mock data doesn't have subdivision
-        deadline: project.deadline,
-        budget: project.budget,
-        budgetSpent: parseInt(project.budgetSpent.replace('%', '')) || 0,
-        biddingStatus: project.status === 'Planning' ? 'Quote Sent' : undefined
-      }));
-
-      // Apply filters for mock data
-      if (input.status && input.status !== 'All') {
-        items = items.filter(item => item.status === input.status);
-      }
-
-      if (input.q) {
-        const query = input.q.toLowerCase();
-        items = items.filter(item =>
-          [item.title, item.client, item.builder, item.location].some(v => 
-            (v || '').toLowerCase().includes(query)
-          )
-        );
-      }
-
-      const statusOptions = Array.from(new Set(
-        mockProjects.map(p => p.status).filter(Boolean)
-      ));
-
-      return { items, statusOptions };
-    }
-
     const results = await queryAll({
       database_id: PROJECTS_DB_ID,
       sorts: [{ property: 'Last edited time', direction: 'descending' }]
@@ -869,42 +675,7 @@ export async function listProjectsBoard(input: { q?: string; status?: string }):
     return { items, statusOptions };
   } catch (e) {
     console.error('Error listing projects board:', e);
-    console.log('Falling back to mock projects data');
-    
-    // Fallback to mock data on error
-    let items = mockProjects.map(project => ({
-      id: project.id,
-      title: project.title,
-      status: project.status,
-      client: project.client,
-      builder: project.builder,
-      location: project.location,
-      subdivision: undefined,
-      deadline: project.deadline,
-      budget: project.budget,
-      budgetSpent: parseInt(project.budgetSpent.replace('%', '')) || 0,
-      biddingStatus: project.status === 'Planning' ? 'Quote Sent' : undefined
-    }));
-
-    // Apply filters for mock data
-    if (input.status && input.status !== 'All') {
-      items = items.filter(item => item.status === input.status);
-    }
-
-    if (input.q) {
-      const query = input.q.toLowerCase();
-      items = items.filter(item =>
-        [item.title, item.client, item.builder, item.location].some(v => 
-          (v || '').toLowerCase().includes(query)
-        )
-      );
-    }
-
-    const statusOptions = Array.from(new Set(
-      mockProjects.map(p => p.status).filter(Boolean)
-    ));
-
-    return { items, statusOptions };
+    throw new Error(`Failed to fetch projects board: ${e instanceof Error ? e.message : 'Unknown error'}`);
   }
 }
 
@@ -1142,5 +913,155 @@ export async function getProjectPhotos(projectId: string): Promise<Array<{
   } catch (e) {
     console.error('Error getting project photos:', e);
     throw new Error(`Failed to fetch project photos: ${e instanceof Error ? e.message : 'Unknown error'}`);
+  }
+}
+
+// Enhanced photo search function with comprehensive filtering
+export async function searchPhotos(params: {
+  projectId?: string;
+  search?: string; // Search in description, project name, photographer
+  category?: string;
+  photographer?: string;
+  dateFrom?: string; // ISO date string
+  dateTo?: string; // ISO date string
+  projectName?: string;
+  location?: string;
+}): Promise<Array<{
+  id: string;
+  url: string;
+  description?: string;
+  date: string;
+  category?: string;
+  photographer?: string;
+  projectId?: string;
+  projectName?: string;
+  projectLocation?: string;
+  metadata?: {
+    width?: number;
+    height?: number;
+    fileSize?: string;
+  };
+}>> {
+  try {
+    const filters: any[] = [];
+
+    // Filter by project if specified
+    if (params.projectId) {
+      filters.push({
+        property: 'Projects',
+        relation: { contains: params.projectId }
+      });
+    }
+
+    // Filter by category if specified
+    if (params.category) {
+      filters.push({
+        property: 'Category',
+        select: { equals: params.category }
+      });
+    }
+
+    // Filter by photographer if specified
+    if (params.photographer) {
+      filters.push({
+        property: 'Photographer',
+        rich_text: { contains: params.photographer }
+      });
+    }
+
+    // Filter by date range
+    if (params.dateFrom || params.dateTo) {
+      const dateFilter: any = { property: 'Date', date: {} };
+      if (params.dateFrom) {
+        dateFilter.date.on_or_after = params.dateFrom;
+      }
+      if (params.dateTo) {
+        dateFilter.date.on_or_before = params.dateTo;
+      }
+      filters.push(dateFilter);
+    }
+
+    const photoResults = await queryAll({
+      database_id: PHOTOS_DB_ID,
+      ...(filters.length > 0 && { filter: { and: filters } }),
+      sorts: [{ property: 'Date', direction: 'descending' }]
+    });
+
+    // Map photos and get project information
+    let photos = await Promise.all(photoResults.map(async (photo: any) => {
+      const photoProps = photo.properties || {};
+      const files = photoProps['Photo']?.files || [];
+      const url = files[0]?.file?.url || files[0]?.external?.url || '';
+      
+      // Get project information
+      const projectRelations = readRelation(photoProps, 'Projects');
+      let projectName = '';
+      let projectLocation = '';
+      let projectId = '';
+      
+      if (projectRelations.length > 0) {
+        projectId = projectRelations[0].id;
+        try {
+          // Get project details for name and location
+          const projectPage = await notion.pages.retrieve({ page_id: projectId });
+          if ('properties' in projectPage) {
+            const projectProps = projectPage.properties;
+            projectName = readTitle(projectProps, 'Heading') || '';
+            projectLocation = readTextish(projectProps, 'Location') || '';
+          }
+        } catch (e) {
+          console.warn('Failed to get project details for photo:', e);
+        }
+      }
+      
+      return {
+        id: photo.id,
+        url,
+        description: readTitle(photoProps, 'Name') || 'Photo',
+        date: readTextish(photoProps, 'Date') || new Date().toISOString().split('T')[0],
+        category: readTextish(photoProps, 'Category'),
+        photographer: readTextish(photoProps, 'Photographer'),
+        projectId,
+        projectName,
+        projectLocation,
+        metadata: {
+          fileSize: readTextish(photoProps, 'File Size')
+        }
+      };
+    }));
+
+    // Filter out photos without URLs
+    photos = photos.filter((photo) => photo.url);
+
+    // Apply text-based filters (search, project name, location)
+    if (params.search && params.search.trim()) {
+      const searchTerm = params.search.toLowerCase().trim();
+      photos = photos.filter(photo => 
+        photo.description?.toLowerCase().includes(searchTerm) ||
+        photo.projectName?.toLowerCase().includes(searchTerm) ||
+        photo.photographer?.toLowerCase().includes(searchTerm) ||
+        photo.category?.toLowerCase().includes(searchTerm) ||
+        photo.projectLocation?.toLowerCase().includes(searchTerm)
+      );
+    }
+
+    if (params.projectName && params.projectName.trim()) {
+      const projectNameTerm = params.projectName.toLowerCase().trim();
+      photos = photos.filter(photo => 
+        photo.projectName?.toLowerCase().includes(projectNameTerm)
+      );
+    }
+
+    if (params.location && params.location.trim()) {
+      const locationTerm = params.location.toLowerCase().trim();
+      photos = photos.filter(photo => 
+        photo.projectLocation?.toLowerCase().includes(locationTerm)
+      );
+    }
+
+    return photos;
+  } catch (e) {
+    console.error('Error searching photos:', e);
+    throw new Error(`Failed to search photos: ${e instanceof Error ? e.message : 'Unknown error'}`);
   }
 }
