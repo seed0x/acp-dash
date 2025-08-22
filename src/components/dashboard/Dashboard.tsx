@@ -9,6 +9,7 @@ import { ProjectDetailPanel } from '../project-detail/ProjectDetailPanel';
 import { Project, KPIs } from '../../types';
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts';
 import { useNotifications } from '../../contexts/NotificationContext';
+import { useApp } from '../../contexts/AppContext';
 
 interface DashboardProps {
   kpis: KPIs;
@@ -16,11 +17,11 @@ interface DashboardProps {
 
 export const Dashboard: React.FC<DashboardProps> = ({ kpis }) => {
   const [viewingProjectId, setViewingProjectId] = useState<string | null>(null);
-  const [projects, setProjects] = useState<Project[]>([]);
   const [filteredProjects, setFilteredProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { notify } = useNotifications();
+  const { projects, setProjects } = useApp();
 
   useKeyboardShortcuts();
 

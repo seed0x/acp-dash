@@ -12,7 +12,7 @@ export const IssueReporter: React.FC = () => {
   const [selectedProject, setSelectedProject] = useState('');
   const [priority, setPriority] = useState('medium');
 
-  const handleSubmitIssue = () => {
+  const handleSubmitIssue = async () => {
     if (!issueText.trim()) {
       notify('Please enter an issue description', 'warning');
       return;
@@ -23,11 +23,34 @@ export const IssueReporter: React.FC = () => {
       return;
     }
 
-    // In a real app, this would be an API call
-    notify('Issue reported successfully!', 'success');
-    setIssueText('');
-    setSelectedProject('');
-    setPriority('medium');
+    try {
+      const response = await fetch('/api/tasks', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          projectId: selectedProject,
+          title: issueText.trim(),
+          priority: priority,
+          status: 'Not started'
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to create task');
+      }
+
+      const result = await response.json();
+      notify('Issue reported and task created successfully!', 'success');
+      setIssueText('');
+      setSelectedProject('');
+      setPriority('medium');
+    } catch (error) {
+      console.error('Error creating task:', error);
+      notify(error instanceof Error ? error.message : 'Failed to report issue', 'error');
+    }
   };
 
   return (

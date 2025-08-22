@@ -1,6 +1,35 @@
 // src/app/api/tasks/route.ts
 import { NextResponse } from 'next/server';
-import { notion, TASKS_DB_ID } from '@/lib/notion-dashboard';
+import { notion, TASKS_DB_ID, listImprovements } from '@/lib/notion-dashboard';
+
+export async function GET(req: Request) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const openOnly = searchParams.get('openOnly') === 'true';
+    
+    // Use the existing listImprovements function which works with tasks
+    const tasks = await listImprovements(openOnly);
+    
+    return NextResponse.json({ 
+      tasks: tasks.map(task => ({
+        id: task.id,
+        title: task.title,
+        status: task.status,
+        priority: task.priority,
+        assignee: task.assignee,
+        description: task.description,
+        projectName: task.projectName,
+        completed: task.status === 'Done' || task.status === 'Complete'
+      }))
+    });
+  } catch (e: any) {
+    console.error('Tasks GET error:', e);
+    return NextResponse.json({ 
+      error: e?.message || 'Failed to fetch tasks',
+      tasks: []
+    }, { status: 500 });
+  }
+}
 
 export async function POST(req: Request) {
   try {

@@ -9,32 +9,61 @@ export const useTasks = (projectId: string) => {
   const [loading, setLoading] = useState(false);
   const { notify } = useNotifications();
 
-  const addTask = useCallback(async (title: string, assignee?: string) => {
+  const addTask = useCallback(async (
+    title: string, 
+    assignee?: string, 
+    priority?: string, 
+    dueDate?: string
+  ) => {
     if (!title.trim()) return;
 
     const optimisticTask: Task = {
       id: Date.now(),
       title,
       completed: false,
-      assignee
+      assignee,
+      priority,
+      dueDate
     };
 
     // Optimistic update
     setTasks(prev => [...prev, optimisticTask]);
 
     try {
-      // API call would go here
-      // const response = await fetch(`/api/projects/${projectId}/tasks`, {
-      //   method: 'POST',
-      //   headers: { 'Content-Type': 'application/json' },
-      //   body: JSON.stringify({ title, assignee })
-      // });
+      const response = await fetch('/api/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          projectId, 
+          title, 
+          assignee,
+          priority,
+          dueDate,
+          status: 'Not started'
+        })
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to create task');
+      }
+      
+      const result = await response.json();
+      
+      // Update with real ID from server
+      setTasks(prev => 
+        prev.map(t => 
+          t.id === optimisticTask.id 
+            ? { ...t, id: result.id }
+            : t
+        )
+      );
       
       notify('Task added', 'success');
     } catch (error) {
       // Rollback optimistic update
       setTasks(prev => prev.filter(t => t.id !== optimisticTask.id));
-      notify('Failed to add task', 'error');
+      notify(error instanceof Error ? error.message : 'Failed to add task', 'error');
     }
   }, [projectId, notify]);
 
@@ -42,24 +71,38 @@ export const useTasks = (projectId: string) => {
     const task = tasks.find(t => t.id === taskId);
     if (!task) return;
 
+    const newCompletedState = !task.completed;
+
     // Optimistic update
     setTasks(prev => 
       prev.map(t => 
         t.id === taskId 
-          ? { ...t, completed: !t.completed }
+          ? { ...t, completed: newCompletedState }
           : t
       )
     );
 
     try {
-      // API call would go here
-      // const response = await fetch(`/api/tasks/${taskId}`, {
-      //   method: 'PATCH',
-      //   headers: { 'Content-Type': 'application/json' },
-      //   body: JSON.stringify({ completed: !task.completed })
-      // });
+      const response = await fetch(`/api/tasks/${taskId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          completed: newCompletedState,
+          status: newCompletedState ? 'Done' : 'In progress'
+        })
+      });
       
-      notify(`Task ${!task.completed ? 'completed' : 'reopened'}`, 'success');
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to update task');
+      }
+      
+      // If task is now completed, show additional notification about moving to improvements
+      if (newCompletedState) {
+        notify('Task completed and moved to improvements!', 'success');
+      } else {
+        notify('Task reopened', 'success');
+      }
     } catch (error) {
       // Rollback optimistic update
       setTasks(prev => 
@@ -69,22 +112,40 @@ export const useTasks = (projectId: string) => {
             : t
         )
       );
-      notify('Failed to update task', 'error');
+      notify(error instanceof Error ? error.message : 'Failed to update task', 'error');
     }
   }, [tasks, notify]);
 
   const updateTask = useCallback(async (taskId: string | number, updates: Partial<Task>) => {
+    // Optimistic update
+    setTasks(prev => 
+      prev.map(task => 
+        task.id === taskId 
+          ? { ...task, ...updates }
+          : task
+      )
+    );
+
     try {
-      setTasks(prev => 
-        prev.map(task => 
-          task.id === taskId 
-            ? { ...task, ...updates }
-            : task
-        )
-      );
+      const response = await fetch(`/api/tasks/${taskId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          assignee: updates.assignee,
+          status: updates.completed ? 'Done' : (updates as any).status,
+          completed: updates.completed
+        })
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to update task');
+      }
+      
       notify('Task updated', 'success');
     } catch (error) {
-      notify('Failed to update task', 'error');
+      // Rollback optimistic update - we'd need to fetch the original state
+      notify(error instanceof Error ? error.message : 'Failed to update task', 'error');
     }
   }, [notify]);
 
