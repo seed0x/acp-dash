@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Header } from '../Header';
 import { SearchBar } from './SearchBar';
 import { ProjectGrid } from './ProjectGrid';
@@ -8,6 +8,7 @@ import { QuickActionsSidebar } from '../quick-actions/QuickActionsSidebar';
 import { ProjectDetailPanel } from '../project-detail/ProjectDetailPanel';
 import { Project, KPIs } from '../../types';
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts';
+import { useNotifications } from '../../contexts/NotificationContext';
 
 interface DashboardProps {
   kpis: KPIs;
@@ -15,14 +16,65 @@ interface DashboardProps {
 
 export const Dashboard: React.FC<DashboardProps> = ({ kpis }) => {
   const [viewingProjectId, setViewingProjectId] = useState<string | null>(null);
-  const [projects] = useState<Project[]>([
-    { id: '1', title: 'Apple Ln', subdivision: 'Oak Ridge', status: 'Bidding', client: 'John Smith', builder: 'ABC Construction', location: '123 Apple Ln', jobNumber: '2024-001' },
-    { id: '2', title: 'Pine St', subdivision: 'Westview', status: 'Post & Beam', client: 'Jane Doe', builder: 'XYZ Builders', location: '456 Pine St', jobNumber: '2024-002' },
-    { id: '3', title: 'Oak Grove', subdivision: 'Eastside', status: 'Trim', client: 'Bob Johnson', builder: 'DEF Construction', location: '789 Oak Grove', jobNumber: '2024-003' },
-  ]);
-  const [filteredProjects, setFilteredProjects] = useState(projects);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [filteredProjects, setFilteredProjects] = useState<Project[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const { notify } = useNotifications();
 
   useKeyboardShortcuts();
+
+  // Function to map API response to Project interface
+  const mapApiDataToProject = (apiItem: any): Project => ({
+    id: apiItem.id,
+    title: apiItem.title,
+    subdivision: apiItem.subdivision,
+    status: apiItem.status,
+    client: apiItem.client,
+    builder: apiItem.builder,
+    location: apiItem.location,
+    deadline: apiItem.deadline,
+    budget: apiItem.budget,
+    // Note: jobNumber is not provided by the API, so we omit it
+    // Additional fields like tasks, issues, comments, photos are not included in board view
+  });
+
+  // Fetch projects data from API
+  useEffect(() => {
+    const fetchProjects = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        
+        const response = await fetch('/api/projects/board');
+        
+        if (!response.ok) {
+          throw new Error(`Failed to fetch projects: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        if (data.error) {
+          throw new Error(data.error);
+        }
+        
+        // Map API response items to Project interface
+        const mappedProjects = data.items.map(mapApiDataToProject);
+        setProjects(mappedProjects);
+        setFilteredProjects(mappedProjects);
+        
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : 'Failed to load projects';
+        setError(errorMessage);
+        console.error('Error fetching projects:', err);
+        notify(errorMessage, 'error');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchProjects();
+  }, [notify]);
 
   const handleSearch = (searchTerm: string) => {
     if (!searchTerm) {
@@ -46,10 +98,33 @@ export const Dashboard: React.FC<DashboardProps> = ({ kpis }) => {
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
           <div className="lg:col-span-3 space-y-6">
             <SearchBar onSearch={handleSearch} />
-            <ProjectGrid 
-              projects={filteredProjects} 
-              onProjectClick={setViewingProjectId}
-            />
+            
+            {loading && (
+              <div className="flex items-center justify-center py-12">
+                <div className="text-center">
+                  <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mb-4"></div>
+                  <p className="text-slate-400">Loading projects...</p>
+                </div>
+              </div>
+            )}
+            
+            {error && !loading && (
+              <div className="bg-red-900/20 border border-red-500 rounded-lg p-4">
+                <p className="text-red-400">
+                  <strong>Error:</strong> {error}
+                </p>
+                <p className="text-slate-400 text-sm mt-2">
+                  Please try refreshing the page or contact support if the issue persists.
+                </p>
+              </div>
+            )}
+            
+            {!loading && !error && (
+              <ProjectGrid 
+                projects={filteredProjects} 
+                onProjectClick={setViewingProjectId}
+              />
+            )}
           </div>
           
           <div className="lg:col-span-1">

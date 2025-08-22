@@ -2,6 +2,8 @@
 import { NextResponse } from 'next/server';
 import { listProjectsBoard } from '@/lib/notion-dashboard';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
