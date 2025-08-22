@@ -1,6 +1,36 @@
 // src/app/api/tasks/route.ts
 import { NextResponse } from 'next/server';
-import { notion, TASKS_DB_ID } from '@/lib/notion-dashboard';
+import { notion, TASKS_DB_ID, listTasks, completeTaskAndCreateImprovement } from '@/lib/notion-dashboard';
+
+export async function GET(req: Request) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const openOnly = searchParams.get('openOnly') === 'true';
+    const projectId = searchParams.get('projectId') || undefined;
+    const search = searchParams.get('search') || undefined;
+    const status = searchParams.get('status')?.split(',') || undefined;
+    const assignee = searchParams.get('assignee') || undefined;
+
+    const tasks = await listTasks({
+      openOnly,
+      projectId,
+      search,
+      status,
+      assignee
+    });
+
+    return NextResponse.json({ 
+      ok: true,
+      tasks
+    });
+  } catch (e: any) {
+    console.error('Tasks GET error:', e);
+    return NextResponse.json({ 
+      error: e?.message || 'Failed to fetch tasks',
+      tasks: []
+    }, { status: 500 });
+  }
+}
 
 export async function POST(req: Request) {
   try {
@@ -67,7 +97,7 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   try {
-    const { completed, status, assignee } = await req.json();
+    const { completed, status, assignee, createImprovement } = await req.json();
     
     if (!params.id) {
       return NextResponse.json({ 
@@ -98,6 +128,16 @@ export async function PATCH(
       page_id: params.id,
       properties
     } as any);
+
+    // If task is completed and createImprovement is true, create improvement
+    if ((completed || status === 'Done') && createImprovement) {
+      try {
+        await completeTaskAndCreateImprovement(params.id);
+      } catch (error) {
+        console.error('Failed to create improvement:', error);
+        // Don't fail the task update if improvement creation fails
+      }
+    }
 
     return NextResponse.json({ 
       ok: true,

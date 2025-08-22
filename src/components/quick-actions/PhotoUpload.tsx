@@ -3,6 +3,7 @@
 import React, { useState, useCallback } from 'react';
 import { Camera, Upload, X, Check, AlertCircle } from 'lucide-react';
 import { useNotifications } from '../../contexts/NotificationContext';
+import { useApp } from '../../contexts/AppContext';
 
 interface PhotoFile {
   file: File;
@@ -13,19 +14,17 @@ interface PhotoFile {
 }
 
 interface PhotoUploadProps {
-  projectId?: string;
-  onUploadComplete?: (urls: string[]) => void;
   maxFiles?: number;
 }
 
 export const PhotoUpload: React.FC<PhotoUploadProps> = ({ 
-  projectId, 
-  onUploadComplete,
   maxFiles = 10 
 }) => {
   const { notify } = useNotifications();
+  const { projects } = useApp();
   const [selectedFiles, setSelectedFiles] = useState<PhotoFile[]>([]);
   const [description, setDescription] = useState('');
+  const [selectedProjectId, setSelectedProjectId] = useState('');
   const [isUploading, setIsUploading] = useState(false);
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -62,8 +61,8 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
   }, []);
 
   const uploadFiles = async () => {
-    if (!projectId) {
-      notify('Project ID is required for upload', 'error');
+    if (!selectedProjectId) {
+      notify('Project selection is required for upload', 'error');
       return;
     }
 
@@ -86,7 +85,7 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
 
         const formData = new FormData();
         formData.append('file', photoFile.file);
-        formData.append('projectId', projectId);
+        formData.append('projectId', selectedProjectId);
         formData.append('description', description || `Photo - ${photoFile.file.name}`);
 
         const response = await fetch('/api/photos', {
@@ -137,7 +136,9 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
       
       if (successfulUrls.length > 0) {
         notify(`${successfulUrls.length} photo(s) uploaded successfully!`, 'success');
-        onUploadComplete?.(successfulUrls);
+        // Clear form on success
+        setDescription('');
+        setSelectedProjectId('');
       }
       
       if (failedCount > 0) {
@@ -207,6 +208,20 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
           />
         </label>
 
+        {/* Project selection */}
+        <select
+          value={selectedProjectId}
+          onChange={(e) => setSelectedProjectId(e.target.value)}
+          className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white text-sm"
+        >
+          <option value="">Select a project</option>
+          {projects.map(project => (
+            <option key={project.id} value={project.id}>
+              {project.title} {project.subdivision ? `- ${project.subdivision}` : ''}
+            </option>
+          ))}
+        </select>
+
         {/* Description input */}
         <input
           type="text"
@@ -258,14 +273,14 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
         {selectedFiles.length > 0 && (
           <button
             onClick={uploadFiles}
-            disabled={isUploading || !projectId}
+            disabled={isUploading || !selectedProjectId}
             className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {isUploading ? 'Uploading...' : `Upload ${selectedFiles.length} Photo(s)`}
           </button>
         )}
 
-        {!projectId && (
+        {!selectedProjectId && selectedFiles.length > 0 && (
           <p className="text-xs text-amber-400">
             Select a project to enable photo upload
           </p>

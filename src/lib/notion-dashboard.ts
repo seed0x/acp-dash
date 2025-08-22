@@ -415,9 +415,9 @@ export async function createImprovement(input: {
   projectId: string; 
   title: string;
   priority?: string;
-}) {
+}): Promise<string> {
   try {
-    await notion.pages.create({
+    const response = await notion.pages.create({
       parent: { database_id: IMPROVEMENTS_DB_ID },
       properties: {
         'Improvement': { title: [{ text: { content: input.title } }] },
@@ -426,6 +426,7 @@ export async function createImprovement(input: {
         ...(input.priority && { 'Priority': { select: { name: input.priority } } })
       }
     } as any);
+    return response.id;
   } catch (e) {
     console.error('Error creating improvement:', e);
     throw new Error(`Failed to create improvement: ${e instanceof Error ? e.message : 'Unknown error'}`);
@@ -444,9 +445,9 @@ export async function createTask(input: {
 }): Promise<string> {
   try {
     const properties: any = {
-      'Improvement': { title: [{ text: { content: input.title } }] },
+      'Task': { title: [{ text: { content: input.title } }] },
       'Projects': { relation: [{ id: input.projectId }] },
-      'Status': { status: { name: input.status || 'Open' } }
+      'Status': { status: { name: input.status || 'Not started' } }
     };
 
     if (input.description) {
@@ -456,14 +457,14 @@ export async function createTask(input: {
       properties['Priority'] = { select: { name: input.priority } };
     }
     if (input.assignee) {
-      properties['Assignee'] = { rich_text: [{ text: { content: input.assignee } }] };
+      properties['Asignee'] = { rich_text: [{ text: { content: input.assignee } }] }; // Note: keeping original Notion spelling
     }
     if (input.dueDate) {
       properties['Due Date'] = { date: { start: input.dueDate } };
     }
 
     const response = await notion.pages.create({
-      parent: { database_id: IMPROVEMENTS_DB_ID },
+      parent: { database_id: TASKS_DB_ID },
       properties
     } as any);
 
@@ -487,7 +488,7 @@ export async function updateTask(taskId: string, updates: {
     const properties: any = {};
 
     if (updates.title) {
-      properties['Improvement'] = { title: [{ text: { content: updates.title } }] };
+      properties['Task'] = { title: [{ text: { content: updates.title } }] };
     }
     if (updates.description !== undefined) {
       properties['Description'] = updates.description 
@@ -503,7 +504,7 @@ export async function updateTask(taskId: string, updates: {
         : { select: null };
     }
     if (updates.assignee !== undefined) {
-      properties['Assignee'] = updates.assignee 
+      properties['Asignee'] = updates.assignee  // Note: keeping original Notion spelling
         ? { rich_text: [{ text: { content: updates.assignee } }] }
         : { rich_text: [] };
     }
@@ -537,6 +538,32 @@ export async function bulkUpdateTaskStatus(taskIds: string[], status: string): P
   } catch (e) {
     console.error('Error bulk updating task status:', e);
     throw new Error(`Failed to bulk update tasks: ${e instanceof Error ? e.message : 'Unknown error'}`);
+  }
+}
+
+// Move completed task to improvements database
+export async function completeTaskAndCreateImprovement(taskId: string): Promise<string> {
+  try {
+    // Get the task details first
+    const task = await getTaskDetails(taskId);
+    if (!task) {
+      throw new Error('Task not found');
+    }
+
+    // Update task status to Done
+    await updateTask(taskId, { status: 'Done' });
+
+    // Create improvement entry
+    const improvementId = await createImprovement({
+      projectId: task.projectId!,
+      title: task.title,
+      priority: task.priority
+    });
+
+    return improvementId;
+  } catch (e) {
+    console.error('Error completing task and creating improvement:', e);
+    throw new Error(`Failed to complete task workflow: ${e instanceof Error ? e.message : 'Unknown error'}`);
   }
 }
 
