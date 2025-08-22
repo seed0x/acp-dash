@@ -261,7 +261,7 @@ export const shouldUseMockData = (): boolean => {
   return !process.env.NOTION_TOKEN;
 };
 
-// Check if running in a restricted environment (like GitHub Actions)
+// Check if running in a restricted environment (GitHub Actions CI only)
 export const isRestrictedEnvironment = (): boolean => {
-  return !!(process.env.GITHUB_ACTIONS || process.env.CI);
+  return !!process.env.GITHUB_ACTIONS;
 };
