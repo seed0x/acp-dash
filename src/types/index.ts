@@ -15,6 +15,28 @@ export interface Project {
   issues?: Issue[];
   comments?: Comment[];
   photos?: Photo[];
+  // Additional Notion fields
+  constructionPhase?: string;
+  projectManager?: string;
+  jobAccountSetup?: boolean | string;
+  needFollowUp?: boolean | string;
+  lastUpdated?: string;
+  subDivision?: string;
+  spent?: string;
+  budgetSpent?: number;
+  contract?: string;
+  documentation?: string;
+  expenses?: any[];
+  filesMedia?: string;
+  hourlyRate?: string;
+  improvements?: any[];
+  lastEditedTime?: string;
+  notes?: string;
+  options?: string;
+  team?: string;
+  timeTracking?: string;
+  totalExpenses?: string;
+  totalHours?: string;
 }
 
 export interface Task {

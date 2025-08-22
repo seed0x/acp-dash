@@ -1,7 +1,7 @@
 'use client'
 
-import React, { useState, useMemo } from 'react';
-import { AlertTriangle, Plus, Trash2, ExternalLink } from 'lucide-react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { AlertTriangle, Plus, Trash2, ExternalLink, Loader2 } from 'lucide-react';
 import { Issue } from '../../types';
 import { useNotifications } from '../../contexts/NotificationContext';
 
@@ -12,16 +12,57 @@ interface IssueListProps {
 
 export const IssueList: React.FC<IssueListProps> = ({ projectId, searchTerm }) => {
   const { notify } = useNotifications();
-  const [issues, setIssues] = useState<Issue[]>([
-    { id: 1, title: 'Leak in bathroom', status: 'Open', priority: 'High' },
-    { id: 2, title: 'Missing permits', status: 'In Progress', priority: 'Medium' }
-  ]);
+  const [issues, setIssues] = useState<Issue[]>([]);
+  const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
   const [newIssue, setNewIssue] = useState({
     title: '',
     description: '',
-    priority: 'medium' as const
+    priority: 'Medium' as const
   });
+
+  // Fetch issues for the project
+  useEffect(() => {
+    const fetchIssues = async () => {
+      if (!projectId) return;
+      
+      try {
+        setLoading(true);
+        const response = await fetch(`/api/projects/${projectId}/full`);
+        
+        if (!response.ok) {
+          throw new Error(`Failed to fetch project issues: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        if (data.improvements && Array.isArray(data.improvements)) {
+          setIssues(data.improvements.map((imp: any) => ({
+            id: imp.id,
+            title: imp.title,
+            status: imp.status || 'Open',
+            priority: imp.priority || 'Medium',
+            description: imp.description,
+            assignee: imp.assignee,
+            projectId,
+            projectName: data.project?.title
+          })));
+        } else if (data.issues && Array.isArray(data.issues)) {
+          // Legacy format
+          setIssues(data.issues);
+        } else {
+          setIssues([]);
+        }
+      } catch (err) {
+        console.error('Error fetching project issues:', err);
+        notify('Failed to load project issues', 'error');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchIssues();
+  }, [projectId, notify]);
 
   const filteredIssues = useMemo(() => {
     if (!searchTerm) return issues;
@@ -29,7 +70,8 @@ export const IssueList: React.FC<IssueListProps> = ({ projectId, searchTerm }) =
     return issues.filter(issue => 
       issue.title.toLowerCase().includes(term) ||
       issue.description?.toLowerCase().includes(term) ||
-      issue.priority?.toLowerCase().includes(term)
+      issue.priority?.toLowerCase().includes(term) ||
+      issue.assignee?.toLowerCase().includes(term)
     );
   }, [issues, searchTerm]);
 
@@ -39,65 +81,119 @@ export const IssueList: React.FC<IssueListProps> = ({ projectId, searchTerm }) =
       return;
     }
 
-    const issue: Issue = {
-      id: Date.now(),
-      title: newIssue.title,
-      description: newIssue.description,
-      priority: newIssue.priority,
-      status: 'Open'
-    };
+    try {
+      const response = await fetch('/api/improvements', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          projectId,
+          title: newIssue.title.trim(),
+          description: newIssue.description.trim(),
+          priority: newIssue.priority,
+        }),
+      });
 
-    setIssues(prev => [...prev, issue]);
-    setNewIssue({ title: '', description: '', priority: 'medium' });
-    setShowAddForm(false);
-    notify('Issue added successfully', 'success');
+      if (!response.ok) {
+        throw new Error('Failed to create issue');
+      }
+
+      const data = await response.json();
+      
+      setIssues(prev => [...prev, {
+        id: data.id,
+        title: newIssue.title.trim(),
+        description: newIssue.description.trim(),
+        status: 'Open',
+        priority: newIssue.priority,
+        projectId
+      }]);
+      
+      setNewIssue({
+        title: '',
+        description: '',
+        priority: 'Medium'
+      });
+      
+      setShowAddForm(false);
+      notify('Issue created successfully', 'success');
+    } catch (err) {
+      console.error('Error creating issue:', err);
+      notify('Failed to create issue', 'error');
+    }
   };
 
-  const deleteIssue = (issueId: string | number) => {
-    setIssues(prev => prev.filter(i => i.id !== issueId));
-    notify('Issue deleted', 'success');
+  const handleDeleteIssue = async (issueId: string | number) => {
+    if (!confirm('Are you sure you want to delete this issue?')) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/improvements/${issueId}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to delete issue');
+      }
+
+      setIssues(prev => prev.filter(issue => issue.id !== issueId));
+      notify('Issue deleted successfully', 'success');
+    } catch (err) {
+      console.error('Error deleting issue:', err);
+      notify('Failed to delete issue', 'error');
+    }
   };
 
   const getPriorityColor = (priority?: string) => {
-    switch (priority?.toLowerCase()) {
+    if (!priority) return 'text-slate-400 bg-slate-800';
+    switch (priority.toLowerCase()) {
       case 'high':
-      case 'critical':
-        return 'text-red-400 bg-red-500/20';
+        return 'text-red-400 bg-red-950/30';
       case 'medium':
-        return 'text-orange-400 bg-orange-500/20';
+        return 'text-amber-400 bg-amber-950/30';
       case 'low':
-        return 'text-green-400 bg-green-500/20';
+        return 'text-green-400 bg-green-950/30';
       default:
-        return 'text-slate-400 bg-slate-500/20';
+        return 'text-slate-400 bg-slate-800';
     }
   };
 
-  const getStatusColor = (status: string) => {
+  const getStatusColor = (status?: string) => {
+    if (!status) return 'border-slate-700';
     switch (status.toLowerCase()) {
       case 'open':
-        return 'text-red-400 bg-red-500/20';
+        return 'border-amber-600/30';
       case 'in progress':
-        return 'text-orange-400 bg-orange-500/20';
-      case 'resolved':
+        return 'border-blue-600/30';
       case 'closed':
-        return 'text-green-400 bg-green-500/20';
+      case 'complete':
+      case 'done':
+        return 'border-emerald-600/30';
       default:
-        return 'text-slate-400 bg-slate-500/20';
+        return 'border-slate-700';
     }
   };
 
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center py-12">
+        <Loader2 className="w-8 h-8 animate-spin text-slate-500" />
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="font-semibold text-white">
-          Issues ({filteredIssues.length})
-        </h3>
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <h2 className="text-lg font-semibold text-white">Issues ({filteredIssues.length})</h2>
         <button
-          onClick={() => setShowAddForm(!showAddForm)}
-          className="flex items-center gap-1 px-3 py-1.5 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700 transition-colors"
+          onClick={() => setShowAddForm(true)}
+          className="flex items-center gap-1 text-xs bg-blue-600 hover:bg-blue-500 text-white px-2 py-1 rounded"
         >
-          <Plus className="h-4 w-4" />
-          Add Issue
+          <Plus className="h-3 w-3" />
+          New Issue
         </button>
       </div>
 
@@ -106,92 +202,83 @@ export const IssueList: React.FC<IssueListProps> = ({ projectId, searchTerm }) =
           <input
             type="text"
             value={newIssue.title}
-            onChange={(e) => setNewIssue(prev => ({ ...prev, title: e.target.value }))}
-            placeholder="Issue title..."
-            className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 text-sm"
+            onChange={e => setNewIssue(prev => ({ ...prev, title: e.target.value }))}
+            placeholder="Issue title"
+            className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-white text-sm"
           />
           <textarea
             value={newIssue.description}
-            onChange={(e) => setNewIssue(prev => ({ ...prev, description: e.target.value }))}
-            placeholder="Issue description..."
-            className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 text-sm resize-none"
-            rows={3}
+            onChange={e => setNewIssue(prev => ({ ...prev, description: e.target.value }))}
+            placeholder="Description (optional)"
+            className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-white text-sm h-20 resize-none"
           />
-          <select
-            value={newIssue.priority}
-            onChange={(e) => setNewIssue(prev => ({ ...prev, priority: e.target.value as any }))}
-            className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm"
-          >
-            <option value="low">Low Priority</option>
-            <option value="medium">Medium Priority</option>
-            <option value="high">High Priority</option>
-            <option value="critical">Critical</option>
-          </select>
-          <div className="flex gap-2">
-            <button
-              onClick={handleAddIssue}
-              className="px-3 py-1.5 bg-green-600 text-white rounded text-sm hover:bg-green-700 transition-colors"
+          <div className="flex justify-between">
+            <select
+              value={newIssue.priority}
+              onChange={e => setNewIssue(prev => ({ ...prev, priority: e.target.value as any }))}
+              className="bg-slate-800 border border-slate-700 rounded px-3 py-2 text-white text-sm"
             >
-              Add Issue
-            </button>
-            <button
-              onClick={() => {
-                setShowAddForm(false);
-                setNewIssue({ title: '', description: '', priority: 'medium' });
-              }}
-              className="px-3 py-1.5 bg-slate-600 text-white rounded text-sm hover:bg-slate-700 transition-colors"
-            >
-              Cancel
-            </button>
+              <option value="High">High Priority</option>
+              <option value="Medium">Medium Priority</option>
+              <option value="Low">Low Priority</option>
+            </select>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowAddForm(false)}
+                className="px-3 py-1 text-xs border border-slate-600 rounded hover:bg-slate-700"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAddIssue}
+                className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-500"
+              >
+                Add Issue
+              </button>
+            </div>
           </div>
         </div>
       )}
 
-      <div className="space-y-3">
-        {filteredIssues.map(issue => (
-          <div key={issue.id} className="bg-slate-800/30 border border-slate-700 rounded-lg p-4">
-            <div className="flex items-start justify-between mb-2">
-              <div className="flex items-center gap-2">
-                <AlertTriangle className="h-5 w-5 text-orange-400" />
-                <h4 className="font-medium text-white">{issue.title}</h4>
-              </div>
-              <div className="flex items-center gap-2">
-                <button className="p-1 text-slate-400 hover:text-blue-400 transition-colors">
-                  <ExternalLink className="h-4 w-4" />
-                </button>
-                <button
-                  onClick={() => deleteIssue(issue.id)}
-                  className="p-1 text-slate-400 hover:text-red-400 transition-colors"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
+      {filteredIssues.length > 0 ? (
+        <div className="space-y-3">
+          {filteredIssues.map(issue => (
+            <div
+              key={issue.id}
+              className={`border ${getStatusColor(issue.status)} bg-slate-800/30 rounded-lg p-3 flex items-start gap-3`}
+            >
+              <AlertTriangle className={`h-5 w-5 mt-0.5 flex-shrink-0 ${getPriorityColor(issue.priority).split(' ')[0]}`} />
+              <div className="flex-1 min-w-0">
+                <div className="flex justify-between">
+                  <h3 className="font-medium text-white">{issue.title}</h3>
+                  <button
+                    onClick={() => handleDeleteIssue(issue.id)}
+                    className="text-slate-400 hover:text-red-400 transition-colors"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+                {issue.description && (
+                  <p className="text-sm text-slate-400 mt-1">{issue.description}</p>
+                )}
+                <div className="flex items-center gap-3 mt-2">
+                  <span className={`px-2 py-1 rounded text-xs ${getPriorityColor(issue.priority)}`}>
+                    {issue.priority || 'No Priority'}
+                  </span>
+                  <span className="text-xs text-slate-400">{issue.status || 'Open'}</span>
+                  {issue.assignee && (
+                    <span className="text-xs text-slate-400">Assigned to: {issue.assignee}</span>
+                  )}
+                </div>
               </div>
             </div>
-
-            {issue.description && (
-              <p className="text-slate-300 text-sm mb-3">{issue.description}</p>
-            )}
-
-            <div className="flex items-center gap-2">
-              <span className={`px-2 py-1 rounded text-xs font-medium ${getStatusColor(issue.status)}`}>
-                {issue.status}
-              </span>
-              {issue.priority && (
-                <span className={`px-2 py-1 rounded text-xs font-medium ${getPriorityColor(issue.priority)}`}>
-                  {issue.priority} Priority
-                </span>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {filteredIssues.length === 0 && (
-        <div className="text-center py-8">
-          <AlertTriangle className="h-12 w-12 text-slate-600 mx-auto mb-3" />
-          <p className="text-slate-400">
-            {searchTerm ? 'No issues match your search' : 'No issues reported yet'}
-          </p>
+          ))}
+        </div>
+      ) : (
+        <div className="flex flex-col items-center justify-center py-8 text-center bg-slate-800/30 rounded-lg border border-slate-700">
+          <AlertTriangle className="h-12 w-12 text-slate-600 mb-3" />
+          <p className="text-slate-400 mb-1">No issues found</p>
+          <p className="text-xs text-slate-500">Issues and improvement requests will appear here</p>
         </div>
       )}
     </div>

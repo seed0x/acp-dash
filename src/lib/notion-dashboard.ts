@@ -723,6 +723,7 @@ export async function getProjectFull(id: string): Promise<any> {
       builder: readTextish(props, 'Builder'),
       location: readTextish(props, 'Location'),
       status: readTextish(props, 'Status'),
+      subdivision: readTextish(props, 'Sub-Division') || readTextish(props, 'Subdivision'),
       budget: readTextish(props, 'Budget'),
       spent: readTextish(props, 'Spent'),
       budgetSpent: readTextish(props, 'Budget spent'),
@@ -748,6 +749,8 @@ export async function getProjectFull(id: string): Promise<any> {
       // Legacy properties for backward compatibility
       deadline: readTextish(props, 'Deadline'),
       team: readTextish(props, 'Team'),
+      // Ensure jobNumber is populated for consistency
+      jobNumber: readTextish(props, 'Job Number'),
       biddingStatus: readTextish(props, 'BiddingStatus')
     };
 
