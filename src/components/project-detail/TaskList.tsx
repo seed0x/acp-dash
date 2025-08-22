@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useMemo } from 'react';
-import { CheckSquare, Square, User, Plus, Trash2, Edit3 } from 'lucide-react';
+import { CheckSquare, Square, User, Plus, Trash2, Edit3, Calendar, AlertCircle } from 'lucide-react';
 import { useTasks } from '../../hooks/useTasks';
 import { useNotifications } from '../../contexts/NotificationContext';
 
@@ -15,6 +15,8 @@ export const TaskList: React.FC<TaskListProps> = ({ projectId, searchTerm }) => 
   const { notify } = useNotifications();
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskAssignee, setNewTaskAssignee] = useState('');
+  const [newTaskPriority, setNewTaskPriority] = useState('medium');
+  const [newTaskDueDate, setNewTaskDueDate] = useState('');
   const [showAddForm, setShowAddForm] = useState(false);
 
   const filteredTasks = useMemo(() => {
@@ -32,9 +34,16 @@ export const TaskList: React.FC<TaskListProps> = ({ projectId, searchTerm }) => 
       return;
     }
 
-    await addTask(newTaskTitle, newTaskAssignee || undefined);
+    await addTask(
+      newTaskTitle, 
+      newTaskAssignee || undefined,
+      newTaskPriority,
+      newTaskDueDate || undefined
+    );
     setNewTaskTitle('');
     setNewTaskAssignee('');
+    setNewTaskPriority('medium');
+    setNewTaskDueDate('');
     setShowAddForm(false);
   };
 
@@ -65,12 +74,30 @@ export const TaskList: React.FC<TaskListProps> = ({ projectId, searchTerm }) => 
             placeholder="Task title..."
             className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 text-sm"
           />
+          <div className="grid grid-cols-2 gap-3">
+            <input
+              type="text"
+              value={newTaskAssignee}
+              onChange={(e) => setNewTaskAssignee(e.target.value)}
+              placeholder="Assignee (optional)..."
+              className="px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 text-sm"
+            />
+            <select
+              value={newTaskPriority}
+              onChange={(e) => setNewTaskPriority(e.target.value)}
+              className="px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm"
+            >
+              <option value="low">Low Priority</option>
+              <option value="medium">Medium Priority</option>
+              <option value="high">High Priority</option>
+              <option value="critical">Critical</option>
+            </select>
+          </div>
           <input
-            type="text"
-            value={newTaskAssignee}
-            onChange={(e) => setNewTaskAssignee(e.target.value)}
-            placeholder="Assignee (optional)..."
-            className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 text-sm"
+            type="date"
+            value={newTaskDueDate}
+            onChange={(e) => setNewTaskDueDate(e.target.value)}
+            className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm"
           />
           <div className="flex gap-2">
             <button
@@ -84,6 +111,8 @@ export const TaskList: React.FC<TaskListProps> = ({ projectId, searchTerm }) => 
                 setShowAddForm(false);
                 setNewTaskTitle('');
                 setNewTaskAssignee('');
+                setNewTaskPriority('medium');
+                setNewTaskDueDate('');
               }}
               className="px-3 py-1.5 bg-slate-600 text-white rounded text-sm hover:bg-slate-700 transition-colors"
             >
@@ -144,20 +173,53 @@ interface TaskItemProps {
     title: string;
     completed: boolean;
     assignee?: string;
+    priority?: string;
+    dueDate?: string;
   };
   onToggle: () => void;
   onDelete: () => void;
 }
 
 const TaskItem: React.FC<TaskItemProps> = ({ task, onToggle, onDelete }) => {
+  const getPriorityColor = (priority?: string) => {
+    switch (priority?.toLowerCase()) {
+      case 'critical': return 'text-red-400';
+      case 'high': return 'text-orange-400';
+      case 'medium': return 'text-yellow-400';
+      case 'low': return 'text-green-400';
+      default: return 'text-slate-400';
+    }
+  };
+
+  const formatDate = (dateString?: string) => {
+    if (!dateString) return null;
+    try {
+      const date = new Date(dateString);
+      const now = new Date();
+      const diffDays = Math.ceil((date.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+      
+      if (diffDays < 0) {
+        return <span className="text-red-400">Overdue</span>;
+      } else if (diffDays === 0) {
+        return <span className="text-orange-400">Due today</span>;
+      } else if (diffDays <= 3) {
+        return <span className="text-yellow-400">Due in {diffDays} days</span>;
+      } else {
+        return <span className="text-slate-400">Due {date.toLocaleDateString()}</span>;
+      }
+    } catch {
+      return null;
+    }
+  };
+
   return (
     <div className={`
-      flex items-center gap-3 p-3 bg-slate-800/30 rounded-lg border border-slate-700
+      flex items-start gap-3 p-3 bg-slate-800/30 rounded-lg border border-slate-700
       ${task.completed ? 'opacity-60' : ''}
     `}>
       <button
         onClick={onToggle}
-        className="text-blue-400 hover:text-blue-300 transition-colors"
+        className="text-blue-400 hover:text-blue-300 transition-colors mt-0.5"
       >
         {task.completed ? (
           <CheckSquare className="h-5 w-5" />
@@ -167,20 +229,37 @@ const TaskItem: React.FC<TaskItemProps> = ({ task, onToggle, onDelete }) => {
       </button>
 
       <div className="flex-1 min-w-0">
-        <p className={`text-white ${task.completed ? 'line-through' : ''}`}>
-          {task.title}
-        </p>
-        {task.assignee && (
-          <div className="flex items-center gap-1 mt-1">
-            <User className="h-3 w-3 text-slate-400" />
-            <span className="text-xs text-slate-400">{task.assignee}</span>
-          </div>
-        )}
+        <div className="flex items-start justify-between gap-2 mb-1">
+          <p className={`text-white font-medium ${task.completed ? 'line-through' : ''}`}>
+            {task.title}
+          </p>
+          {task.priority && (
+            <span className={`text-xs font-medium px-2 py-1 rounded ${getPriorityColor(task.priority)} bg-slate-700/50`}>
+              {task.priority}
+            </span>
+          )}
+        </div>
+        
+        <div className="flex items-center gap-4 text-xs text-slate-400">
+          {task.assignee && (
+            <div className="flex items-center gap-1">
+              <User className="h-3 w-3" />
+              <span>{task.assignee}</span>
+            </div>
+          )}
+          
+          {task.dueDate && (
+            <div className="flex items-center gap-1">
+              <Calendar className="h-3 w-3" />
+              {formatDate(task.dueDate)}
+            </div>
+          )}
+        </div>
       </div>
 
       <button
         onClick={onDelete}
-        className="p-1 text-slate-400 hover:text-red-400 transition-colors"
+        className="p-1 text-slate-400 hover:text-red-400 transition-colors mt-0.5"
       >
         <Trash2 className="h-4 w-4" />
       </button>
