@@ -4,6 +4,7 @@ import React from 'react';
 import { Clock, Star, FolderOpen } from 'lucide-react';
 import { PhotoUpload } from './PhotoUpload';
 import { IssueReporter } from './IssueReporter';
+import { OpenIssuesWidget } from '../dashboard/OpenIssuesWidget';
 import { useApp } from '../../contexts/AppContext';
 
 export const QuickActionsSidebar: React.FC = () => {
@@ -17,6 +18,7 @@ export const QuickActionsSidebar: React.FC = () => {
     <div className="space-y-6">
       <PhotoUpload />
       <IssueReporter />
+      <OpenIssuesWidget />
       
       {recentProjects.length > 0 && (
         <div className="bg-slate-800/30 border border-slate-700 rounded-xl p-4">

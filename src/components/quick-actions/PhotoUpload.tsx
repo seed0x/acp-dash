@@ -3,6 +3,7 @@
 import React, { useState, useCallback } from 'react';
 import { Camera, Upload, X, Check, AlertCircle } from 'lucide-react';
 import { useNotifications } from '../../contexts/NotificationContext';
+import { useApp } from '../../contexts/AppContext';
 
 interface PhotoFile {
   file: File;
@@ -19,14 +20,16 @@ interface PhotoUploadProps {
 }
 
 export const PhotoUpload: React.FC<PhotoUploadProps> = ({ 
-  projectId, 
+  projectId: propProjectId, 
   onUploadComplete,
   maxFiles = 10 
 }) => {
   const { notify } = useNotifications();
+  const { projects } = useApp();
   const [selectedFiles, setSelectedFiles] = useState<PhotoFile[]>([]);
   const [description, setDescription] = useState('');
   const [isUploading, setIsUploading] = useState(false);
+  const [selectedProjectId, setSelectedProjectId] = useState<string>(propProjectId || '');
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
@@ -62,8 +65,9 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
   }, []);
 
   const uploadFiles = async () => {
-    if (!projectId) {
-      notify('Project ID is required for upload', 'error');
+    const currentProjectId = propProjectId || selectedProjectId;
+    if (!currentProjectId) {
+      notify('Please select a project for upload', 'error');
       return;
     }
 
@@ -86,7 +90,7 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
 
         const formData = new FormData();
         formData.append('file', photoFile.file);
-        formData.append('projectId', projectId);
+        formData.append('projectId', currentProjectId);
         formData.append('description', description || `Photo - ${photoFile.file.name}`);
 
         const response = await fetch('/api/photos', {
@@ -186,6 +190,22 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
       </h3>
       
       <div className="space-y-3">
+        {/* Project selection - only show if not provided via props */}
+        {!propProjectId && (
+          <select
+            value={selectedProjectId}
+            onChange={(e) => setSelectedProjectId(e.target.value)}
+            className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm"
+          >
+            <option value="">Select a project</option>
+            {projects.map(project => (
+              <option key={project.id} value={project.id}>
+                {project.title} {project.subdivision ? `- ${project.subdivision}` : ''}
+              </option>
+            ))}
+          </select>
+        )}
+
         {/* File input */}
         <label className="block">
           <div className="border-2 border-dashed border-slate-600 rounded-lg p-6 text-center hover:border-slate-500 transition-colors cursor-pointer">
@@ -258,14 +278,14 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
         {selectedFiles.length > 0 && (
           <button
             onClick={uploadFiles}
-            disabled={isUploading || !projectId}
+            disabled={isUploading || !(propProjectId || selectedProjectId)}
             className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {isUploading ? 'Uploading...' : `Upload ${selectedFiles.length} Photo(s)`}
           </button>
         )}
 
-        {!projectId && (
+        {!(propProjectId || selectedProjectId) && (
           <p className="text-xs text-amber-400">
             Select a project to enable photo upload
           </p>
