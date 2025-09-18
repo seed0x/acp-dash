@@ -156,12 +156,7 @@ export async function listJobAccountPending(): Promise<Array<{
   try {
     const results = await queryAll({
       database_id: PROJECTS_DB_ID,
-      filter: {
-        or: [
-          { property: 'Job Account Setup', checkbox: { equals: false } },
-          { property: 'Job Account Setup', checkbox: { is_empty: true } }
-        ]
-      }
+      filter: { property: 'Job Account Setup', checkbox: { equals: false } }
     });
 
     const pending = results.map((r: any) => {
@@ -596,7 +591,7 @@ export async function listProjectOptions(): Promise<Array<{ id: string; title: s
     const results = await queryAll({ 
       database_id: PROJECTS_DB_ID, 
       page_size: 100,
-      sorts: [{ property: 'Heading', direction: 'ascending' }]
+      sorts: [{ property: 'Project', direction: 'ascending' }]
     });
     
     const options = results.map((r: any) => ({ 
@@ -1068,3 +1063,4 @@ export async function searchPhotos(params: {
     throw new Error(`Failed to search photos: ${e instanceof Error ? e.message : 'Unknown error'}`);
   }
 }
+
